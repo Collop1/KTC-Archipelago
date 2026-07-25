@@ -2,4 +2,3 @@ bin/*
 obj/*
 AddInteropRefs.ps1
 Archipelago/Archipelago MultiClient Net/*
-

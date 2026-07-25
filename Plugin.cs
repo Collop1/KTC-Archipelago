@@ -21,7 +21,6 @@ using Newtonsoft.Json;
 using PlayFab.Internal;
 using TMPro;
 using UnityEngine; // For Input
-using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -730,7 +729,7 @@ public static class PluginUI
         TMP_FontAsset[] fonts = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
         foreach (var font in fonts)
         {
-            if (UnityEngine.Object.GetName(font).Contains("Kingdom"))
+            if (font != null && font.name.Contains("Kingdom", StringComparison.OrdinalIgnoreCase))
             {
                 KingdomTMPFont = font;
                 Plugin.Log.LogInfo("[AP] Kingdom_TMP font found!");
