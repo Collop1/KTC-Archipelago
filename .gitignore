@@ -1,4 +1,9 @@
-bin/*
-obj/*
-AddInteropRefs.ps1
-Archipelago/Archipelago MultiClient Net/*
+mod/bin/*
+mod/obj/*
+mod/AddInteropRefs.ps1
+mod/Archipelago/Archipelago MultiClient Net/*
+
+# Python apworld
+apworld/**/__pycache__/
+*.apworld
+*.pyc

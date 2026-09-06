@@ -74,17 +74,26 @@ namespace APKingdom2Crown.Archipelago
             //Disconnect();
         }
 
-        private static async void OnPacktRevieved(ArchipelagoPacketBase packet)
+        private static void OnPacktRevieved(ArchipelagoPacketBase packet)
         {
             Plugin.Log.LogInfo(packet.ToJObject().ToString());
         }
 
-        private static async void OnItemReceived(ReceivedItemsHelper helper)
+        // private static async void OnItemReceived(ReceivedItemsHelper helper)
+        // {
+        //     foreach (var item in helper.AllItemsReceived)
+        //     {
+        //         Plugin.Log.LogInfo($"[AP] Received item: {item.ItemGame} from {item.Player}");
+        //         helper.DequeueItem();
+        //     }
+        // }
+
+        private static void OnItemReceived(ReceivedItemsHelper helper)
         {
-            foreach (var item in helper.AllItemsReceived)
+            while (helper.PeekItem() != null)
             {
+                var item = helper.DequeueItem();
                 Plugin.Log.LogInfo($"[AP] Received item: {item.ItemGame} from {item.Player}");
-                helper.DequeueItem();
             }
         }
 
