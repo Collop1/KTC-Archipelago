@@ -1,10 +1,13 @@
 from BaseClasses import Tutorial
 from worlds.AutoWorld import WebWorld
 
+from .options import OPTION_GROUPS
+
 
 class KingdomTwoCrownsWebWorld(WebWorld):
     theme = "grassFlowers"
     game = "Kingdom Two Crowns"
+    option_groups = OPTION_GROUPS
     tutorials = [
         Tutorial(
             "Multiworld Setup Guide",

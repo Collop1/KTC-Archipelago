@@ -6,7 +6,8 @@
 - [BepInEx](https://builds.bepinex.dev/projects/bepinex_be) - IL2CPP build, `win-x64` (or your OS), build 735
   or later
 - [Cpp2IL.Patch](https://github.com/abevol/KingdomMod/releases/download/2.4.0/Cpp2IL.Patch.zip)
-- The KTC-Archipelago mod DLL from this repo's `mod/` releases
+- The KTC-Archipelago mod from this repo's `mod/` releases (`APKingdom2Crown.dll`,
+  `Archipelago.MultiClient.Net.dll` and `Newtonsoft.Json.dll`)
 
 ## Installation
 
@@ -14,8 +15,15 @@
    Kingdom Two Crowns > Manage > Browse local files).
 2. Unzip Cpp2IL.Patch into the same folder.
 3. Run the game once to let BepInEx initialize itself, then close it.
-4. Download the mod DLL and drop it into `BepInEx/plugins/`.
-5. Launch the game, open the pause menu, and enter your Archipelago server address, slot name, and password
-   (if any), then connect.
+4. Put the three mod DLLs in `BepInEx/plugins/Archipelago/`.
+5. Launch the game and press **F2** to open the Archipelago menu.
 
-See `mod/docs/README.md` in this repository for the full walkthrough with a directory-layout screenshot.
+## Connecting
+
+1. In the **Connect** tab, click each box and type the server address (for example `archipelago.gg:38281`), your
+   slot name and the room password if it has one.
+2. Click **Connect**. The details are remembered for next time, and you can turn on auto-connect.
+3. Start or continue a campaign. Checks you make while disconnected are saved and sent when you reconnect.
+
+The menu key can be changed in the **Settings** tab (Kingdom Enhanced uses F1, F3 and F4, so both mods work side by
+side). Settings and per-seed progress live in `BepInEx/config/APKingdom2Crown/`; there is no config file to edit.

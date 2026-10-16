@@ -1,17 +1,23 @@
+from typing import Any
+
 from worlds.AutoWorld import World
 
 from . import items, locations, regions, rules
 from .items import KingdomTwoCrownsItem
+from .locations import MILESTONES
 from .options import KingdomTwoCrownsOptions
 from .web_world import KingdomTwoCrownsWebWorld
+
+# Bump when slot_data changes shape so the mod can warn about a mismatched apworld.
+SLOT_DATA_VERSION = 2
 
 
 class KingdomTwoCrownsWorld(World):
     """
     Kingdom Two Crowns is a side-scrolling kingdom-building game: ride out
     each day to gather coins and gems, spend them on statues, mounts and
-    hermits, then defend your castle each night. The goal is to liberate all
-    five islands from the Greed.
+    hermits, then defend your castle each night. Liberate the islands from
+    the Greed to win.
     """
 
     game = "Kingdom Two Crowns"
@@ -22,6 +28,8 @@ class KingdomTwoCrownsWorld(World):
 
     location_name_to_id = locations.LOCATION_NAME_TO_ID
     item_name_to_id = items.ITEM_NAME_TO_ID
+    location_name_groups = locations.LOCATION_NAME_GROUPS
+    item_name_groups = items.ITEM_NAME_GROUPS
 
     origin_region_name = "Menu"
 
@@ -41,8 +49,25 @@ class KingdomTwoCrownsWorld(World):
     def set_rules(self) -> None:
         rules.set_all_rules(self)
 
-    def fill_slot_data(self) -> dict:
-        return {
-            "death_link": bool(self.options.death_link),
-            "no_text": bool(self.options.no_text),
+    def fill_slot_data(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "slot_data_version": SLOT_DATA_VERSION,
+            **self.options.as_dict(
+                "islands_to_liberate",
+                "island_unlocks",
+                "forest_checks",
+                "waves_gone_by_days",
+                "vagrants_per_item",
+                "death_link",
+                "death_link_effect",
+            ),
         }
+        # The mod rebuilds every milestone location name from these.
+        data["milestones"] = {
+            category: {
+                "interval": getattr(self.options, milestone.interval_option).value,
+                "count": getattr(self.options, milestone.count_option).value,
+            }
+            for category, milestone in MILESTONES.items()
+        }
+        return data
