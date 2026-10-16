@@ -8,19 +8,37 @@ from dataclasses import dataclass
 from Options import Choice, DeathLink, DefaultOnToggle, OptionGroup, PerGameCommonOptions, Range
 
 
+class Campaign(Choice):
+    """Which campaign you're playing. Start a new campaign of this kind in the game for the seed.
+    two_crowns: the base game's campaign (5 islands).
+    shogun: the Shogun campaign (5 islands, its own mounts).
+    dead_lands: the Dead Lands campaign (5 islands, ruler statues to free).
+    norselands: the Norselands DLC (6 islands, god puzzles that grant Items of Power).
+    call_of_olympus: the Call of Olympus DLC (oracle, god and quest islands; goal is defeating the World
+    Serpent on Mount Olympus). Its islands open through its own quests, so Island Unlocks doesn't apply."""
+    display_name = "Campaign"
+    option_two_crowns = 0
+    option_shogun = 1
+    option_dead_lands = 2
+    option_norselands = 3
+    option_call_of_olympus = 4
+    default = 0
+
+
 class IslandsToLiberate(Range):
-    """How many islands must be liberated (cliff portal destroyed) to win. Any islands count."""
+    """How many islands must be liberated (cliff portal destroyed) to win. Any islands count. Capped at the
+    campaign's island count (5, or 6 for Norselands). Not used for Call of Olympus."""
     display_name = "Islands to Liberate"
     range_start = 1
-    range_end = 5
+    range_end = 6
     default = 5
 
 
 class IslandUnlocks(DefaultOnToggle):
-    """Islands 2-5 are items. You can only sail to an island once you have received its unlock, so you may
-    end up going from island 1 straight to island 3 to chase a hinted check.
+    """Every island after the first is an item. You can only sail to an island once you have received its
+    unlock, so you may end up going from island 1 straight to island 3 to chase a hinted check.
 
-    When off, islands open up in order like the base game."""
+    When off, islands open up in order like the base game. Not used for Call of Olympus."""
     display_name = "Island Unlocks"
 
 
@@ -153,15 +171,6 @@ class TreeChecks(Range):
     default = 10
 
 
-class ForestChecks(Range):
-    """Number of 'Clear Forest N' checks. A forest counts once every tree in it has been chopped down, e.g. a
-    patch of woods sitting between two clearings. Experimental: set to 0 if it never triggers for you."""
-    display_name = "Forest Clearing Checks"
-    range_start = 0
-    range_end = 5
-    default = 1
-
-
 # --- Filler and traps --------------------------------------------------------------------------------
 
 class TrapPercentage(Range):
@@ -282,6 +291,7 @@ class DeathLinkEffect(Choice):
 
 @dataclass
 class KingdomTwoCrownsOptions(PerGameCommonOptions):
+    campaign: Campaign
     islands_to_liberate: IslandsToLiberate
     island_unlocks: IslandUnlocks
     greed_kill_interval: GreedKillInterval
@@ -298,7 +308,6 @@ class KingdomTwoCrownsOptions(PerGameCommonOptions):
     night_checks: NightChecks
     tree_interval: TreeInterval
     tree_checks: TreeChecks
-    forest_checks: ForestChecks
     trap_percentage: TrapPercentage
     trip_trap_weight: TripTrapWeight
     slippery_pouch_trap_weight: SlipperyPouchTrapWeight
@@ -317,7 +326,7 @@ class KingdomTwoCrownsOptions(PerGameCommonOptions):
 
 
 OPTION_GROUPS = [
-    OptionGroup("Goal & Islands", [IslandsToLiberate, IslandUnlocks]),
+    OptionGroup("Campaign & Goal", [Campaign, IslandsToLiberate, IslandUnlocks]),
     OptionGroup("Milestone Checks", [
         GreedKillInterval, GreedKillChecks,
         GreedlingKillInterval, GreedlingKillChecks,
@@ -326,7 +335,6 @@ OPTION_GROUPS = [
         CrownStealerKillInterval, CrownStealerKillChecks,
         NightInterval, NightChecks,
         TreeInterval, TreeChecks,
-        ForestChecks,
     ]),
     OptionGroup("Traps", [
         TrapPercentage, TripTrapWeight, SlipperyPouchTrapWeight, WaveBackTrapWeight,

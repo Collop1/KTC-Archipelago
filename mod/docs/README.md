@@ -63,6 +63,16 @@ this quick:
 3. **Island unlocks**: with only Island 3 granted, sail from island 1. The map should only let you pick island 3.
    The Game State card shows `LAND_ONE` and the land/island mapping; the log shows any redirect.
 4. **Checks**: open a chest, destroy a portal, pay a statue/shrine/cabin and watch the Checks tab. "Refresh island
-   census" compares what's on the island with what the apworld expects. If the counts are wrong for an island, the
-   numbers in `apworld/.../locations.py` (`ISLAND_CONTENT`) and `mod/Archipelago/GameData.cs` need updating together.
-5. **Kills / trees / forests**: the Checks tab counters should tick up as Greed die and trees fall.
+   census" compares what's on the island with what the apworld expects.
+5. **Kills / trees**: the Checks tab counters should tick up as Greed die and trees fall. Trees only count once a
+   builder has chopped them down.
+6. **DLC campaigns**: Dead Lands ruler statues, Norselands god puzzles and Call of Olympus quests each send their own
+   check, and Items of Power refuse to activate until their "Power of ..." item arrives. Puzzles and quests already
+   done before you first connected to a seed don't count, so start the campaign after connecting.
+
+### Where the per-island numbers come from
+
+Debug > "Dump campaign data" writes `BepInEx/config/APKingdom2Crown/campaign_dump.txt`: every campaign's island layout
+rules straight from the game's level configs (how many chests, portals, statues, shrines and hermits each island
+gets). `apworld/kingdom_two_crowns/campaigns.py` and `mod/Archipelago/GameData.cs` are built from that dump and have to
+be updated together if a game update changes it.

@@ -8,6 +8,7 @@ namespace APKingdom2Crown;
 // Blocks payments the player hasn't earned yet by toggling the game's own Payable.forceBlockPayment:
 //  - castle upgrades beyond the Progressive Castle count
 //  - activating a statue's blessing, paying a freed hermit, or riding a mount without its item
+//  - using an Item of Power without its "Power of ..." item (patched in PowerPatches)
 //  - setting sail when no other island is unlocked
 // The first payment on statues/shrines/cabins (the gem cost) is always allowed, since that's the check.
 // Also keeps the kingdom's stone/iron tech in line with the Stone/Iron Technology items.
@@ -18,9 +19,10 @@ internal static class Gating
     private static float _next;
     private static readonly Dictionary<IntPtr, Payable> Blocked = new();
 
-    public static bool Active => ItemHandler.GatingActive;
+    // Off while playing a different campaign from the seed's, so a wrong campaign isn't locked up.
+    public static bool Active => ItemHandler.GatingActive && GameAccess.CampaignMatches;
 
-    public static bool IslandGatingActive => Active && AP.Slot.IslandUnlocks;
+    public static bool IslandGatingActive => Active && AP.Slot.UsesIslandUnlocks;
 
     public static bool IsIslandUnlocked(int island)
     {
@@ -30,7 +32,7 @@ internal static class Gating
 
     public static int HighestUnlockedIsland()
     {
-        for (int island = GameData.IslandCount; island >= 1; island--)
+        for (int island = AP.Slot.Campaign.IslandCount; island >= 1; island--)
             if (IsIslandUnlocked(island)) return island;
         return 1;
     }
@@ -38,7 +40,7 @@ internal static class Gating
     public static bool CanSailSomewhere()
     {
         int current = GameAccess.CurrentIsland;
-        for (int island = 1; island <= GameData.IslandCount; island++)
+        for (int island = 1; island <= AP.Slot.Campaign.IslandCount; island++)
             if (island != current && IsIslandUnlocked(island)) return true;
         return false;
     }
@@ -92,9 +94,8 @@ internal static class Gating
         foreach (var statue in Object.FindObjectsByType<Statue>(FindObjectsSortMode.None))
         {
             if (statue == null) continue;
-            bool block = statue.deityStatus != Statue.DeityStatus.GemLocked
-                         && GameData.StatueItems.TryGetValue(statue.deity, out var item)
-                         && !ItemHandler.Has(item);
+            var item = GameData.StatueItem(AP.Slot.Campaign, statue.deity);
+            bool block = statue.deityStatus != Statue.DeityStatus.GemLocked && item != null && !ItemHandler.Has(item);
             SetBlocked(statue, block);
         }
     }
@@ -104,7 +105,8 @@ internal static class Gating
         foreach (var hermit in Object.FindObjectsByType<Hermit>(FindObjectsSortMode.None))
         {
             if (hermit == null) continue;
-            bool block = GameData.HermitItems.TryGetValue(hermit.Type, out var item) && !ItemHandler.Has(item);
+            var item = GameData.HermitItem(AP.Slot.Campaign, hermit.Type);
+            bool block = item != null && !ItemHandler.Has(item);
             SetBlocked(hermit, block);
         }
     }
@@ -114,7 +116,8 @@ internal static class Gating
         foreach (var steed in Object.FindObjectsByType<Steed>(FindObjectsSortMode.None))
         {
             if (steed == null) continue;
-            bool block = GameData.MountItems.TryGetValue(steed.steedType, out var item) && !ItemHandler.Has(item);
+            var item = GameData.MountItem(AP.Slot.Campaign, steed.steedType);
+            bool block = item != null && !ItemHandler.Has(item);
             SetBlocked(steed, block);
         }
     }

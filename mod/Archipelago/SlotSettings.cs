@@ -9,9 +9,9 @@ namespace APKingdom2Crown;
 internal sealed class SlotSettings
 {
     public int SlotDataVersion;
+    public GameData.Campaign Campaign = GameData.Campaigns[0];
     public int IslandsToLiberate = 5;
     public bool IslandUnlocks = true;
-    public int ForestChecks = 1;
     public int WavesGoneByDays = 10;
     public int VagrantsPerItem = 2;
     public bool DeathLink;
@@ -30,14 +30,21 @@ internal sealed class SlotSettings
 
     public static SlotSettings Default => new();
 
+    // Islands that must be liberated for the goal, capped at what the campaign has.
+    public int GoalIslands => System.Math.Min(IslandsToLiberate, Campaign.IslandCount);
+
+    // Island unlock items only exist for campaigns with numbered islands.
+    public bool UsesIslandUnlocks => IslandUnlocks && !Campaign.CampaignWide;
+
     public static SlotSettings FromSlotData(Dictionary<string, object> data)
     {
         var s = new SlotSettings();
         if (data == null) return s;
         s.SlotDataVersion = Int(data, "slot_data_version", 0);
+        if (data.TryGetValue("campaign", out var campaign) && campaign != null)
+            s.Campaign = GameData.CampaignByKey(campaign.ToString());
         s.IslandsToLiberate = Int(data, "islands_to_liberate", s.IslandsToLiberate);
         s.IslandUnlocks = Int(data, "island_unlocks", 1) != 0;
-        s.ForestChecks = Int(data, "forest_checks", s.ForestChecks);
         s.WavesGoneByDays = Int(data, "waves_gone_by_days", s.WavesGoneByDays);
         s.VagrantsPerItem = Int(data, "vagrants_per_item", s.VagrantsPerItem);
         s.DeathLink = Int(data, "death_link", 0) != 0;

@@ -10,8 +10,9 @@ namespace APKingdom2Crown;
 //  - Per-island things (portals, chests, statues, shrines, hermit cabins) are progressive: the next
 //    unchecked "Island N: <thing> k" is sent. Each physical object is remembered by its x position so
 //    the same chest/portal can never count twice.
-//  - Milestones (kills, nights, trees, forests) are counters saved in ModState.
-//  - Castle level, arrival, liberation and the goal are polled.
+//  - Milestones (kills, nights, trees) are counters saved in ModState.
+//  - Castle level, arrival, liberation, Norselands puzzles, Olympus quests and the goal are polled.
+//  Call of Olympus scatters its content randomly, so there the same things are counted campaign-wide.
 internal static class CheckTracker
 {
     private const float PollInterval = 1f;
@@ -21,22 +22,13 @@ internal static class CheckTracker
     private static float _nextFullUpgradePoll;
     private static bool? _wasDaytime;
     private static int _dayIsland;
-    // A tree or forest can report its end twice (local call + network echo). Objects are reused and
-    // addresses recycled, so only ignore repeats for a short while.
-    private static readonly Dictionary<IntPtr, float> CountedTrees = new();
-    private static readonly Dictionary<IntPtr, float> CountedForests = new();
-    private const float RepeatWindow = 10f;
+    // Trees a builder has worked on, by address and when. Trees also collapse for reasons that aren't the
+    // player's doing (restored from a save, cleared by the level), so only these count when they fall.
+    private static readonly Dictionary<IntPtr, float> WorkedTrees = new();
+    private const float WorkedTreeMemory = 120f;
 
-    private static bool FirstReport(Dictionary<IntPtr, float> seen, IntPtr ptr)
-    {
-        float now = Time.unscaledTime;
-        if (seen.TryGetValue(ptr, out var when) && now - when < RepeatWindow) return false;
-        seen[ptr] = now;
-        if (seen.Count > 512) seen.Clear();
-        return true;
-    }
-
-    public static bool Tracking => AP.Connected || !AP.State.IsOffline || ItemHandler.SimulateGating;
+    // Never while playing a different campaign from the seed's: its checks would be the wrong ones.
+    public static bool Tracking => (AP.Connected || !AP.State.IsOffline || ItemHandler.SimulateGating) && GameAccess.CampaignMatches;
 
     // --- Per-island progressive checks ---
 
@@ -51,36 +43,42 @@ internal static class CheckTracker
         }
 
         var state = AP.State;
-        var key = $"{thing}@{island}";
+        var campaign = AP.Slot.Campaign;
+        // Campaign-wide counting (Olympus) still remembers positions per island, since x is per island.
+        var key = campaign.CampaignWide ? $"{thing}@L{GameAccess.CurrentLand}" : $"{thing}@{island}";
         if (!state.CountedPositions.TryGetValue(key, out var positions))
             state.CountedPositions[key] = positions = new List<float>();
         if (positions.Any(p => Mathf.Abs(p - x) < SamePositionTolerance)) return;
         positions.Add(x);
         state.Dirty = true;
 
-        int expected = GameData.ExpectedCount(island, thing);
+        int expected = GameData.ExpectedCount(campaign, island, thing);
         // Online the server knows exactly what's checked, so fill the first gap. Offline we only know
-        // how many of these we've seen on this island.
-        int start = AP.Connected ? 1 : positions.Count;
+        // how many of these we've seen.
+        int seen = campaign.CampaignWide
+            ? state.CountedPositions.Where(e => e.Key.StartsWith($"{thing}@L")).Sum(e => e.Value.Count)
+            : positions.Count;
+        int start = AP.Connected ? 1 : seen;
         for (int k = start; k <= expected; k++)
         {
-            var name = GameData.IslandThingLocation(island, thing, k);
+            var name = GameData.IslandThingLocation(campaign, island, thing, k);
             if (AP.IsChecked(name)) continue;
             AP.SendLocation(name);
             return;
         }
-        Plugin.Log.LogInfo($"[AP] Extra {thing} on island {island} at x={x:F0} (all {expected} checks already done)");
-        Feed.Add($"<color=#AAAAAA>No more {GameData.IslandThingLabel(thing)} checks on Island {island}.</color>");
+        var where = campaign.CampaignWide ? "this campaign" : $"Island {island}";
+        Plugin.Log.LogInfo($"[AP] Extra {thing} on {where} at x={x:F0} (all {expected} checks already done)");
+        Feed.Add($"<color=#AAAAAA>No more {GameData.IslandThingLabel(thing)} checks on {where}.</color>");
     }
 
     public static void OnDogFreed()
     {
-        if (Tracking) AP.SendLocation(GameData.DogLocation);
+        if (Tracking) AP.SendLocation(GameData.DogLocation(AP.Slot.Campaign));
     }
 
     public static void OnBoatLaunched()
     {
-        if (!Tracking) return;
+        if (!Tracking || AP.Slot.Campaign.CampaignWide) return;
         int island = GameAccess.CurrentIsland;
         if (island > 0) AP.SendLocation(GameData.BoatLocation(island));
     }
@@ -125,29 +123,24 @@ internal static class CheckTracker
         Plugin.Log.LogDebug($"[AP] Killed {type}");
     }
 
-    public static void OnTreeFelled(IntPtr tree)
+    public static void OnTreeWorked(IntPtr tree)
     {
-        if (!Tracking || !FirstReport(CountedTrees, tree)) return;
-        AddMilestone(GameData.Milestone.Trees);
-    }
-
-    public const string ForestCounter = "Forests";
-
-    public static void OnForestCleared(IntPtr forest)
-    {
-        if (!Tracking || !FirstReport(CountedForests, forest)) return;
-        int cleared = AP.State.AddCounter(ForestCounter, 1);
-        Feed.Add("<color=#00FF7F>A whole forest has been cleared!</color>");
-        SendForests(cleared);
-    }
-
-    private static void SendForests(int cleared)
-    {
-        for (int k = 1; k <= Math.Min(cleared, AP.Slot.ForestChecks); k++)
+        WorkedTrees[tree] = Time.unscaledTime;
+        if (WorkedTrees.Count > 256)
         {
-            var name = GameData.ForestLocation(k);
-            if (!AP.IsChecked(name)) AP.SendLocation(name);
+            float cutoff = Time.unscaledTime - WorkedTreeMemory;
+            foreach (var stale in WorkedTrees.Where(t => t.Value < cutoff).Select(t => t.Key).ToList())
+                WorkedTrees.Remove(stale);
         }
+    }
+
+    public static void OnTreeCollapsed(IntPtr tree, float x)
+    {
+        if (!WorkedTrees.TryGetValue(tree, out var when)) return;
+        WorkedTrees.Remove(tree); // also stops a second collapse call for the same tree counting
+        if (!Tracking || Time.unscaledTime - when > WorkedTreeMemory) return;
+        AddMilestone(GameData.Milestone.Trees);
+        Plugin.Log.LogInfo($"[AP] Tree felled at x={x:F0} (total {MilestoneCount(GameData.Milestone.Trees)})");
     }
 
     // After (re)connecting, resend anything the counters already earned in case it was missed.
@@ -155,7 +148,6 @@ internal static class CheckTracker
     {
         foreach (var milestone in AP.Slot.Milestones.Keys)
             SendReachedMilestones(milestone, MilestoneCount(milestone));
-        SendForests(AP.State.Counter(ForestCounter));
     }
 
     // --- Polling ---
@@ -175,6 +167,8 @@ internal static class CheckTracker
         try { PollIsland(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollIsland: {e.Message}"); }
         try { PollCastle(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollCastle: {e.Message}"); }
         try { PollLiberation(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollLiberation: {e.Message}"); }
+        try { PollPuzzles(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollPuzzles: {e.Message}"); }
+        try { PollQuests(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollQuests: {e.Message}"); }
 
         if (Time.unscaledTime >= _nextFullUpgradePoll)
         {
@@ -201,6 +195,15 @@ internal static class CheckTracker
 
     private static void PollIsland()
     {
+        if (AP.Slot.Campaign.CampaignWide)
+        {
+            if (GameData.OlympusIslands.TryGetValue(GameAccess.CurrentLevelConfigName, out var olympusIsland))
+            {
+                var reach = GameData.OlympusReachLocation(olympusIsland);
+                if (!AP.IsChecked(reach)) AP.SendLocation(reach);
+            }
+            return;
+        }
         int island = GameAccess.CurrentIsland;
         if (island >= 2 && !AP.IsChecked(GameData.ArriveLocation(island))) AP.SendLocation(GameData.ArriveLocation(island));
     }
@@ -215,17 +218,76 @@ internal static class CheckTracker
         }
     }
 
+    public static int LiberatedIslands()
+    {
+        var campaign = AP.Slot.Campaign;
+        if (campaign.CampaignWide) return 0;
+        return Enumerable.Range(1, campaign.IslandCount).Count(GameAccess.IsIslandSecured);
+    }
+
     private static void PollLiberation()
     {
+        var campaign = AP.Slot.Campaign;
+        if (campaign.CampaignWide) return;
         int liberated = 0;
-        for (int island = 1; island <= GameData.IslandCount; island++)
+        for (int island = 1; island <= campaign.IslandCount; island++)
         {
             if (!GameAccess.IsIslandSecured(island)) continue;
             liberated++;
             var name = GameData.LiberateLocation(island);
             if (!AP.IsChecked(name)) AP.SendLocation(name);
         }
-        if (liberated >= AP.Slot.IslandsToLiberate && AP.Connected) AP.ReportGoal();
+        if (liberated >= AP.Slot.GoalIslands && AP.Connected) AP.ReportGoal();
+    }
+
+    // Something that was already done the first time we looked at it (an old save, say) never sends a
+    // check by itself; only finishing it while tracking does. The first look is remembered per seed.
+    private static bool BecameDone(string key, bool done)
+    {
+        var baselineKey = "baseline:" + key;
+        if (!AP.State.Counters.ContainsKey(baselineKey))
+        {
+            AP.State.Counters[baselineKey] = done ? 1 : 0;
+            AP.State.Dirty = true;
+            if (done) Plugin.Log.LogInfo($"[AP] {key} was already done when tracking started; not sending it");
+            return false;
+        }
+        return done && AP.State.Counters[baselineKey] == 0;
+    }
+
+    // Norselands: solving a god's puzzle unlocks its Item of Power in the campaign save.
+    private static void PollPuzzles()
+    {
+        var campaign = AP.Slot.Campaign;
+        var save = CampaignSaveData.current;
+        if (save == null) return;
+        foreach (var (island, content) in campaign.Islands)
+        {
+            if (content.Puzzle == null) continue;
+            var power = GameData.PuzzlePowers[content.Puzzle];
+            bool unlocked = save.GetRulerItemStatus(power).lockState == Player.LockState.Unlocked;
+            var name = GameData.PuzzleLocation(island, content.Puzzle);
+            if (BecameDone("power:" + power, unlocked) && !AP.IsChecked(name))
+            {
+                Feed.Add($"<color=#00FF7F>{content.Puzzle}'s puzzle solved!</color>");
+                AP.SendLocation(name);
+            }
+        }
+    }
+
+    // Call of Olympus: quests, including the final battle against the World Serpent (the goal).
+    private static void PollQuests()
+    {
+        if (!AP.Slot.Campaign.CampaignWide) return;
+        foreach (var (quest, name) in GameData.OlympusQuests)
+        {
+            bool done;
+            try { done = QuestManager.GetQuestCompleted(quest); }
+            catch { continue; }
+            if (!BecameDone("quest:" + quest, done) || AP.IsChecked(name)) continue;
+            AP.SendLocation(name);
+            if (name == GameData.OlympusGoalLocation && AP.Connected) AP.ReportGoal();
+        }
     }
 
     // An island is fully upgraded once the castle is at its last level and no built wall or tower can be

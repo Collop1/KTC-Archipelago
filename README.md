@@ -11,14 +11,15 @@ This repo holds both halves of the integration side by side:
   mounts and sailing behind items. See [`mod/docs/README.md`](mod/docs/README.md) for installation and testing.
 - **[`apworld/kingdom_two_crowns/`](apworld/kingdom_two_crowns/)** - the Archipelago "apworld" (Python) that a
   room host runs to generate a multiworld seed: item/location tables, options, region layout and access logic. See
-  [`apworld/kingdom_two_crowns/docs/`](apworld/kingdom_two_crowns/docs/) for the game info page and setup guide,
-  and [`Game Flow.md`](apworld/kingdom_two_crowns/docs/Game%20Flow.md) for the per-island content notes the logic
-  is built from.
+  [`apworld/kingdom_two_crowns/docs/`](apworld/kingdom_two_crowns/docs/) for the game info page and setup guide.
+  Supports the base Two Crowns campaign plus Shogun, Dead Lands, Norselands and Call of Olympus
+  ([`campaigns.py`](apworld/kingdom_two_crowns/campaigns.py) holds each campaign's per-island content, taken from the
+  game's own level configs).
 
 The mod refers to items and locations only by name and looks ids up in the server's data package, so the apworld is
 the single source of truth for ids. Names still have to match: `mod/Archipelago/GameData.cs` mirrors the names and
-per-island counts in `apworld/kingdom_two_crowns/items.py` and `locations.py`, so a change to one needs the matching
-change in the other. Options reach the mod through slot_data (`world.fill_slot_data`).
+campaign tables in `apworld/kingdom_two_crowns/items.py`, `locations.py` and `campaigns.py`, so a change to one needs
+the matching change in the other. Options reach the mod through slot_data (`world.fill_slot_data`).
 
 ## Building
 

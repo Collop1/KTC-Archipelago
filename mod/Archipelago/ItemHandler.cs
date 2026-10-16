@@ -92,7 +92,8 @@ internal static class ItemHandler
 
     public static void Update()
     {
-        if (!GameAccess.IsPlaying) return;
+        // Hold everything while a different campaign from the seed's is loaded, so it isn't spent there.
+        if (!GameAccess.IsPlaying || !GameAccess.CampaignMatches) return;
 
         if (AP.Connected)
         {

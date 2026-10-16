@@ -4,17 +4,22 @@ Kept deliberately on the strict side, since being too lenient would put a requir
 the player can't actually do yet:
   - Destroying portals needs Stone Technology and a castle upgraded at least four times (bombs).
   - Liberating an island (cliff portal) needs Stone + Iron Technology and five castle upgrades.
-  - Statues, mount shrines and hermit cabins cost gems, which only come from islands 2-5.
+  - Statues, mount shrines and hermit cabins cost gems, which only come from islands 2+ (Olympus has gems
+    from the start).
   - Castle Level 5+ needs Stone Technology, Castle Level 7 needs Iron Technology.
   - Later milestone checks (kills, nights) expect a sturdier kingdom and, for the rarer Greed, more islands.
+  - Call of Olympus: the god quests expect a couple of castle upgrades, Mount Olympus expects all four god
+    quests done, and defeating the serpent expects a strong castle, both techs and all four god powers.
 """
 from math import floor
 
 from worlds.generic.Rules import set_rule
 
+from .campaigns import OLYMPUS_GOD_QUESTS, OLYMPUS_ISLANDS
 from .locations import (
-    CASTLE_LEVELS, FULL_UPGRADE_LOCATION, GEM_KINDS, ISLAND_CONTENT, ISLANDS, MILESTONES, PROGRESSIVE_KINDS,
-    castle_level_name, island_progressive_name, liberate_name, milestone_name, milestone_thresholds,
+    CASTLE_LEVELS, FULL_UPGRADE_LOCATION, GEM_KINDS, MILESTONES, OLYMPUS_GOAL_LOCATION, PROGRESSIVE_KINDS,
+    campaign_progressive_name, castle_level_name, island_progressive_name, liberate_name, milestone_name,
+    milestone_thresholds, olympus_god_quest_name, olympus_reach_name,
 )
 
 CASTLE = "Progressive Castle"
@@ -33,14 +38,6 @@ MILESTONE_REQUIREMENTS: dict[str, tuple[int, int]] = {
 }
 
 
-def islands_reachable(state, player: int) -> int:
-    return sum(state.can_reach_region(f"Island {island}", player) for island in ISLANDS)
-
-
-def has_gem_source(state, player: int) -> bool:
-    return any(state.can_reach_region(f"Island {island}", player) for island in ISLANDS if island > 1)
-
-
 def can_destroy_portals(state, player: int) -> bool:
     return state.has(STONE, player) and state.has(CASTLE, player, 4)
 
@@ -52,19 +49,38 @@ def can_liberate(state, player: int) -> bool:
 def set_all_rules(world) -> None:
     player = world.player
     multiworld = world.multiworld
+    campaign = world.campaign
 
     def location(name: str):
         return multiworld.get_location(name, player)
 
-    for island, content in ISLAND_CONTENT.items():
-        for kind in PROGRESSIVE_KINDS:
-            for k in range(1, getattr(content, kind) + 1):
-                name = island_progressive_name(island, kind, k)
-                if kind == "portals":
-                    set_rule(location(name), lambda state: can_destroy_portals(state, player))
-                elif kind in GEM_KINDS:
-                    set_rule(location(name), lambda state: has_gem_source(state, player))
-        set_rule(location(liberate_name(island)), lambda state: can_liberate(state, player))
+    if campaign.is_campaign_wide:
+        _set_olympus_rules(world, location)
+        islands_reachable = lambda state: 5  # noqa: E731 - Olympus opens its islands through quests
+    else:
+        islands = list(campaign.islands)
+
+        def islands_reachable(state) -> int:
+            return sum(state.can_reach_region(f"Island {i}", player) for i in islands)
+
+        def has_gem_source(state) -> bool:
+            return any(state.can_reach_region(f"Island {i}", player) for i in islands if i > 1)
+
+        for island, content in campaign.islands.items():
+            for kind in PROGRESSIVE_KINDS:
+                for k in range(1, getattr(content, kind) + 1):
+                    name = island_progressive_name(island, kind, k)
+                    if kind == "portals":
+                        set_rule(location(name), lambda state: can_destroy_portals(state, player))
+                    elif kind in GEM_KINDS:
+                        set_rule(location(name), has_gem_source)
+            set_rule(location(liberate_name(island)), lambda state: can_liberate(state, player))
+
+        goal = min(world.options.islands_to_liberate.value, campaign.island_count)
+        liberations = [liberate_name(island) for island in islands]
+        multiworld.completion_condition[player] = lambda state: sum(
+            state.can_reach_location(name, player) for name in liberations
+        ) >= goal
 
     for level in CASTLE_LEVELS:
         needed = [STONE] if level >= 5 else []
@@ -84,10 +100,29 @@ def set_all_rules(world) -> None:
             castle_needed = max(0, tier + extra_castle)
             set_rule(location(milestone_name(category, threshold)),
                      lambda state, c=castle_needed, m=min_islands: state.has(CASTLE, player, c)
-                     and (m <= 1 or islands_reachable(state, player) >= m))
+                     and (m <= 1 or islands_reachable(state) >= m))
 
-    goal = world.options.islands_to_liberate.value
-    liberations = [liberate_name(island) for island in ISLANDS]
-    multiworld.completion_condition[player] = lambda state: sum(
-        state.can_reach_location(name, player) for name in liberations
-    ) >= goal
+
+def _set_olympus_rules(world, location) -> None:
+    player = world.player
+    campaign = world.campaign
+
+    for k in range(1, campaign.totals.portals + 1):
+        set_rule(location(campaign_progressive_name("portals", k)), lambda state: can_destroy_portals(state, player))
+
+    for island in OLYMPUS_ISLANDS:
+        if island.endswith("Quest Island"):
+            set_rule(location(olympus_reach_name(island)), lambda state: state.has(CASTLE, player, 1))
+    for god in OLYMPUS_GOD_QUESTS:
+        set_rule(location(olympus_god_quest_name(god)), lambda state: state.has(CASTLE, player, 2))
+
+    god_quests = [olympus_god_quest_name(god) for god in OLYMPUS_GOD_QUESTS]
+    set_rule(location(olympus_reach_name("Mount Olympus")),
+             lambda state: state.has(STONE, player) and state.has(CASTLE, player, 3)
+             and all(state.can_reach_location(name, player) for name in god_quests))
+    powers = campaign.powers
+    set_rule(location(OLYMPUS_GOAL_LOCATION),
+             lambda state: state.has_all((STONE, IRON) + powers, player) and state.has(CASTLE, player, 5)
+             and state.can_reach_location(olympus_reach_name("Mount Olympus"), player))
+    world.multiworld.completion_condition[player] = \
+        lambda state: state.can_reach_location(OLYMPUS_GOAL_LOCATION, player)

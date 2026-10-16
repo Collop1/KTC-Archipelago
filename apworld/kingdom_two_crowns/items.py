@@ -1,12 +1,14 @@
 """Item table for Kingdom Two Crowns.
 
-The mod only ever refers to items by *name* (ids come from the server's data
-package at runtime), so this file is the single source of truth for ids. The
-names themselves must match mod/Archipelago/GameData.cs exactly.
+The mod only ever refers to items by *name* (ids come from the server's data package at runtime), so this
+file is the single source of truth for ids. The names must match mod/Archipelago/GameData.cs exactly.
+Which statues, hermits, mounts and powers go in the pool depends on the campaign (see campaigns.py).
 """
 from typing import NamedTuple
 
 from BaseClasses import Item, ItemClassification
+
+from .campaigns import CAMPAIGNS, Campaign
 
 ITEM_BASE = 7_550_000
 
@@ -34,17 +36,19 @@ ITEM_TABLE: dict[str, ItemData] = {
     "Stone Technology": ItemData(ITEM_BASE + 1, P, "Buildings"),
     "Iron Technology": ItemData(ITEM_BASE + 2, P, "Buildings"),
 
-    # --- Islands (only in the pool when island_unlocks is on) ---
+    # --- Islands (only with island_unlocks, and only for campaigns with numbered islands) ---
     "Island 2 Unlock": ItemData(ITEM_BASE + 10, P, "Islands"),
     "Island 3 Unlock": ItemData(ITEM_BASE + 11, P, "Islands"),
     "Island 4 Unlock": ItemData(ITEM_BASE + 12, P, "Islands"),
     "Island 5 Unlock": ItemData(ITEM_BASE + 13, P, "Islands"),
+    "Island 6 Unlock": ItemData(ITEM_BASE + 14, P, "Islands"),
 
     # --- Statues: unlocking one with gems is a check; activating its blessing needs the item ---
     "Statue of Archery": ItemData(ITEM_BASE + 20, U, "Statues"),
     "Statue of Building": ItemData(ITEM_BASE + 21, U, "Statues"),
     "Statue of Knights": ItemData(ITEM_BASE + 22, U, "Statues"),
     "Statue of Farming": ItemData(ITEM_BASE + 23, U, "Statues"),
+    "Statue of Pikemen": ItemData(ITEM_BASE + 24, U, "Statues"),
 
     # --- Hermits: freeing one from its cabin is a check; paying it to build needs the item ---
     "Ballista Hermit": ItemData(ITEM_BASE + 30, U, "Hermits"),
@@ -52,6 +56,7 @@ ITEM_TABLE: dict[str, ItemData] = {
     "Horn Hermit": ItemData(ITEM_BASE + 32, U, "Hermits"),
     "Stable Hermit": ItemData(ITEM_BASE + 33, U, "Hermits"),
     "Warrior Hermit": ItemData(ITEM_BASE + 34, U, "Hermits"),
+    "Fire Hermit": ItemData(ITEM_BASE + 35, U, "Hermits"),
 
     # --- Mounts: paying a mount shrine is a check; riding that mount needs the item ---
     "Griffin Mount": ItemData(ITEM_BASE + 40, U, "Mounts"),
@@ -61,8 +66,36 @@ ITEM_TABLE: dict[str, ItemData] = {
     "Lizard Mount": ItemData(ITEM_BASE + 44, U, "Mounts"),
     "Unicorn Mount": ItemData(ITEM_BASE + 45, U, "Mounts"),
     "Stamina Horse": ItemData(ITEM_BASE + 46, U, "Mounts"),
-    "Burst Horse": ItemData(ITEM_BASE + 47, U, "Mounts"),
-    "Fast Horse": ItemData(ITEM_BASE + 48, U, "Mounts"),
+    "Kirin Mount": ItemData(ITEM_BASE + 49, U, "Mounts"),
+    "Gamigin Mount": ItemData(ITEM_BASE + 50, U, "Mounts"),
+    "Golem Mount": ItemData(ITEM_BASE + 51, U, "Mounts"),
+    "Beetle Mount": ItemData(ITEM_BASE + 52, U, "Mounts"),
+    "Hrimfaxe Mount": ItemData(ITEM_BASE + 53, U, "Mounts"),
+    "Cat Cart Mount": ItemData(ITEM_BASE + 54, U, "Mounts"),
+    "Reindeer Mount": ItemData(ITEM_BASE + 55, U, "Mounts"),
+    "Sleipnir Mount": ItemData(ITEM_BASE + 56, U, "Mounts"),
+    "Kelpie Mount": ItemData(ITEM_BASE + 57, U, "Mounts"),
+    "Gullinbursti Mount": ItemData(ITEM_BASE + 58, U, "Mounts"),
+    "Wolf Mount": ItemData(ITEM_BASE + 59, U, "Mounts"),
+    "Molossian Hound Mount": ItemData(ITEM_BASE + 60, U, "Mounts"),
+    "Chimera Mount": ItemData(ITEM_BASE + 61, U, "Mounts"),
+    "Spider Mount": ItemData(ITEM_BASE + 62, U, "Mounts"),
+    "Donkey Mount": ItemData(ITEM_BASE + 63, U, "Mounts"),
+    "Cerberus Mount": ItemData(ITEM_BASE + 64, U, "Mounts"),
+    "Hippocampus Mount": ItemData(ITEM_BASE + 65, U, "Mounts"),
+    "Chariot Mount": ItemData(ITEM_BASE + 66, U, "Mounts"),
+    "Pegasus Mount": ItemData(ITEM_BASE + 67, U, "Mounts"),
+
+    # --- Powers (Items of Power, Norselands and Call of Olympus): earning one in the game is a check;
+    #     using it needs the item ---
+    "Power of Thor": ItemData(ITEM_BASE + 80, U, "Powers"),
+    "Power of Heimdall": ItemData(ITEM_BASE + 81, U, "Powers"),
+    "Power of Hel": ItemData(ITEM_BASE + 82, U, "Powers"),
+    "Power of Loki": ItemData(ITEM_BASE + 83, U, "Powers"),
+    "Power of Artemis": ItemData(ITEM_BASE + 84, U, "Powers"),
+    "Power of Athena": ItemData(ITEM_BASE + 85, U, "Powers"),
+    "Power of Hephaestus": ItemData(ITEM_BASE + 86, U, "Powers"),
+    "Power of Hermes": ItemData(ITEM_BASE + 87, U, "Powers"),
 
     # --- Filler ---
     "Coin Pouch": ItemData(ITEM_BASE + 100, F, "Filler"),  # +5 coins
@@ -109,7 +142,11 @@ TRAP_WEIGHT_OPTIONS: dict[str, str] = {
 
 def create_item(world, name: str) -> KingdomTwoCrownsItem:
     data = ITEM_TABLE[name]
-    return KingdomTwoCrownsItem(name, data.classification, data.id, world.player)
+    classification = data.classification
+    # Olympus' final battle is logically gated on all four god powers.
+    if data.group == "Powers" and world.campaign.is_campaign_wide:
+        classification = P
+    return KingdomTwoCrownsItem(name, classification, data.id, world.player)
 
 
 def get_filler_item_name(world) -> str:
@@ -132,18 +169,20 @@ def get_filler_item_name(world) -> str:
     return world.random.choice(JUNK_ITEMS)
 
 
-def _progression_item_names(world) -> list[str]:
+def campaign_item_names(world) -> list[str]:
+    campaign: Campaign = world.campaign
     names: list[str] = []
     for name, data in ITEM_TABLE.items():
-        if data.group in ("Buildings", "Statues", "Hermits", "Mounts"):
+        if data.group == "Buildings":
             names += [name] * data.count
-        elif data.group == "Islands" and world.options.island_unlocks:
-            names.append(name)
+    if world.options.island_unlocks and not campaign.is_campaign_wide:
+        names += [f"Island {island} Unlock" for island in range(2, campaign.island_count + 1)]
+    names += list(campaign.statues) + list(campaign.hermits) + list(campaign.mounts) + list(campaign.powers)
     return names
 
 
 def create_all_items(world) -> None:
-    itempool = [create_item(world, name) for name in _progression_item_names(world)]
+    itempool = [create_item(world, name) for name in campaign_item_names(world)]
 
     unfilled = len(world.multiworld.get_unfilled_locations(world.player))
     remaining = max(unfilled - len(itempool), 0)
@@ -163,3 +202,6 @@ def create_all_items(world) -> None:
         itempool.append(world.create_filler())
 
     world.multiworld.itempool += itempool
+
+
+assert all(name in ITEM_TABLE for c in CAMPAIGNS.values() for name in c.statues + c.hermits + c.mounts + c.powers)

@@ -1,10 +1,11 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace APKingdom2Crown;
 
-// Item and location names, mirroring apworld/kingdom_two_crowns/items.py and locations.py.
-// The mod never hard-codes ids: they come from the server's data package, so only the names
-// here need to match the apworld.
+// Item and location names plus what each campaign contains, mirroring apworld/kingdom_two_crowns
+// (items.py, locations.py, campaigns.py). The mod never hard-codes ids: they come from the server's data
+// package, so only the names and counts here need to match the apworld.
 internal static class GameData
 {
     public const string GameName = "Kingdom Two Crowns";
@@ -23,6 +24,7 @@ internal static class GameData
         [Statue.Deity.Worker] = "Statue of Building",
         [Statue.Deity.Knight] = "Statue of Knights",
         [Statue.Deity.Farmer] = "Statue of Farming",
+        [Statue.Deity.Pike] = "Statue of Pikemen",
     };
 
     public static readonly Dictionary<Hermit.HermitType, string> HermitItems = new()
@@ -32,22 +34,58 @@ internal static class GameData
         [Hermit.HermitType.Horn] = "Horn Hermit",
         [Hermit.HermitType.Horse] = "Stable Hermit",
         [Hermit.HermitType.Knight] = "Warrior Hermit",
+        [Hermit.HermitType.Fire] = "Fire Hermit",
     };
 
-    public static readonly Dictionary<SteedType, string> MountItems = new()
+    // Steed type -> mount item. A campaign only gates a steed whose item is in its own pool.
+    private static readonly Dictionary<SteedType, string> MountItems = new()
     {
-        [SteedType.P1Griffin] = "Griffin Mount",
-        [SteedType.P2Griffin] = "Griffin Mount",
-        [SteedType.Stag] = "Stag Mount",
-        [SteedType.P2Stag] = "Stag Mount",
-        [SteedType.P1Warhorse] = "Warhorse Mount",
-        [SteedType.P2Warhorse] = "Warhorse Mount",
+        [SteedType.P1Griffin] = "Griffin Mount", [SteedType.P2Griffin] = "Griffin Mount",
+        [SteedType.Stag] = "Stag Mount", [SteedType.P2Stag] = "Stag Mount",
+        [SteedType.HorseStamina] = "Stamina Horse",
+        [SteedType.P1Warhorse] = "Warhorse Mount", [SteedType.P2Warhorse] = "Warhorse Mount",
         [SteedType.Bear] = "Bear Mount",
         [SteedType.Lizard] = "Lizard Mount",
         [SteedType.Unicorn] = "Unicorn Mount",
-        [SteedType.HorseStamina] = "Stamina Horse",
-        [SteedType.HorseBurst] = "Burst Horse",
-        [SteedType.HorseFast] = "Fast Horse",
+        [SteedType.Bloodstained] = "Gamigin Mount",
+        [SteedType.Barrier] = "Golem Mount",
+        [SteedType.Trap] = "Beetle Mount",
+        [SteedType.DayNight] = "Hrimfaxe Mount",
+        [SteedType.CatCart] = "Cat Cart Mount",
+        [SteedType.Reindeer_Norselands] = "Reindeer Mount", [SteedType.P2Reindeer_Norselands] = "Reindeer Mount",
+        [SteedType.Sleipnir] = "Sleipnir Mount",
+        [SteedType.Kelpie] = "Kelpie Mount", [SteedType.P2Kelpie] = "Kelpie Mount",
+        [SteedType.Gullinbursti] = "Gullinbursti Mount",
+        [SteedType.P1Wolf] = "Wolf Mount", [SteedType.P2Wolf] = "Wolf Mount",
+        [SteedType.MolossianHound] = "Molossian Hound Mount",
+        [SteedType.Chimera] = "Chimera Mount",
+        [SteedType.Spider] = "Spider Mount",
+        [SteedType.Donkey] = "Donkey Mount",
+        [SteedType.Cerberus] = "Cerberus Mount",
+        [SteedType.Hippocampus] = "Hippocampus Mount",
+        [SteedType.TheChariotDay] = "Chariot Mount", [SteedType.TheChariotNight] = "Chariot Mount",
+        [SteedType.Pegasus] = "Pegasus Mount",
+    };
+
+    public static readonly Dictionary<ItemOfPower.ItemType, string> PowerItems = new()
+    {
+        [ItemOfPower.ItemType.ThorItem] = "Power of Thor",
+        [ItemOfPower.ItemType.HeimdalItem] = "Power of Heimdall",
+        [ItemOfPower.ItemType.HelItem] = "Power of Hel",
+        [ItemOfPower.ItemType.LokiItem] = "Power of Loki",
+        [ItemOfPower.ItemType.ArtemisBow] = "Power of Artemis",
+        [ItemOfPower.ItemType.MedusaShield] = "Power of Athena",
+        [ItemOfPower.ItemType.HephaestusHammer] = "Power of Hephaestus",
+        [ItemOfPower.ItemType.HermesStaff] = "Power of Hermes",
+    };
+
+    // Norselands god -> the Item of Power its puzzle grants.
+    public static readonly Dictionary<string, ItemOfPower.ItemType> PuzzlePowers = new()
+    {
+        ["Heimdall"] = ItemOfPower.ItemType.HeimdalItem,
+        ["Thor"] = ItemOfPower.ItemType.ThorItem,
+        ["Hel"] = ItemOfPower.ItemType.HelItem,
+        ["Loki"] = ItemOfPower.ItemType.LokiItem,
     };
 
     public const string CoinPouch = "Coin Pouch";
@@ -81,35 +119,37 @@ internal static class GameData
         public string[] Names;
     }
 
-    // Every item, grouped for the menu (Items and Debug tabs).
-    public static readonly ItemGroup[] ItemGroups =
+    // The items a campaign can receive, grouped for the menu (Items and Debug tabs).
+    public static ItemGroup[] ItemGroupsFor(Campaign campaign)
     {
-        new() { Title = "Buildings", Kind = ItemKind.Unlock, Names = new[] { ProgressiveCastle, StoneTech, IronTech } },
-        new() { Title = "Islands", Kind = ItemKind.Unlock, Names = new[] { IslandUnlock(2), IslandUnlock(3), IslandUnlock(4), IslandUnlock(5) } },
-        new() { Title = "Statues", Kind = ItemKind.Unlock, Names = new[] { "Statue of Archery", "Statue of Building", "Statue of Knights", "Statue of Farming" } },
-        new() { Title = "Hermits", Kind = ItemKind.Unlock, Names = new[] { "Ballista Hermit", "Bakery Hermit", "Horn Hermit", "Stable Hermit", "Warrior Hermit" } },
-        new()
+        var groups = new List<ItemGroup>
         {
-            Title = "Mounts", Kind = ItemKind.Unlock,
-            Names = new[] { "Griffin Mount", "Stag Mount", "Warhorse Mount", "Bear Mount", "Lizard Mount", "Unicorn Mount", "Stamina Horse", "Burst Horse", "Fast Horse" },
-        },
-        new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { CoinPouch, CoinSack, Gem, Vagrants } },
-        new() { Title = "Junk", Kind = ItemKind.Junk, Names = JunkItems },
-        new() { Title = "Traps", Kind = ItemKind.Trap, Names = Traps },
-    };
+            new() { Title = "Buildings", Kind = ItemKind.Unlock, Names = new[] { ProgressiveCastle, StoneTech, IronTech } },
+        };
+        if (!campaign.CampaignWide)
+            groups.Add(new() { Title = "Islands", Kind = ItemKind.Unlock, Names = Enumerable.Range(2, campaign.IslandCount - 1).Select(IslandUnlock).ToArray() });
+        groups.Add(new() { Title = "Statues", Kind = ItemKind.Unlock, Names = campaign.Statues });
+        groups.Add(new() { Title = "Hermits", Kind = ItemKind.Unlock, Names = campaign.Hermits });
+        groups.Add(new() { Title = "Mounts", Kind = ItemKind.Unlock, Names = campaign.Mounts });
+        if (campaign.Powers.Length > 0)
+            groups.Add(new() { Title = "Powers", Kind = ItemKind.Unlock, Names = campaign.Powers });
+        groups.Add(new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { CoinPouch, CoinSack, Gem, Vagrants } });
+        groups.Add(new() { Title = "Junk", Kind = ItemKind.Junk, Names = JunkItems });
+        groups.Add(new() { Title = "Traps", Kind = ItemKind.Trap, Names = Traps });
+        return groups.ToArray();
+    }
 
     public static ItemKind KindOf(string itemName)
     {
-        foreach (var group in ItemGroups)
-            foreach (var name in group.Names)
-                if (name == itemName) return group.Kind;
-        return ItemKind.Junk;
+        if (itemName is CoinPouch or CoinSack or Gem or Vagrants) return ItemKind.Filler;
+        if (System.Array.IndexOf(Traps, itemName) >= 0) return ItemKind.Trap;
+        if (System.Array.IndexOf(JunkItems, itemName) >= 0) return ItemKind.Junk;
+        return ItemKind.Unlock;
     }
 
-    // --- Locations ---
-    public const int IslandCount = 5;
+    // --- Campaigns (apworld campaigns.py) ---
 
-    public enum IslandThing { Portal, CoinChest, GemChest, Statue, MountShrine, HermitCabin }
+    public enum IslandThing { Portal, CoinChest, GemChest, Statue, MountShrine, HermitCabin, RulerStatue }
 
     private static readonly Dictionary<IslandThing, string> IslandThingNames = new()
     {
@@ -119,41 +159,182 @@ internal static class GameData
         [IslandThing.Statue] = "Statue",
         [IslandThing.MountShrine] = "Mount Shrine",
         [IslandThing.HermitCabin] = "Hermit Cabin",
+        [IslandThing.RulerStatue] = "Ruler Statue",
     };
 
-    // island -> (portals, coin chests, gem chests, statues, mount shrines, hermit cabins); see locations.py ISLAND_CONTENT
-    private static readonly Dictionary<int, Dictionary<IslandThing, int>> IslandContent = new()
+    public sealed class Content
     {
-        [1] = Content(portals: 1, coin: 3, gem: 0, statues: 1, shrines: 1, hermits: 1),
-        [2] = Content(portals: 3, coin: 2, gem: 3, statues: 1, shrines: 1, hermits: 1),
-        [3] = Content(portals: 5, coin: 3, gem: 3, statues: 1, shrines: 2, hermits: 1),
-        [4] = Content(portals: 7, coin: 1, gem: 3, statues: 0, shrines: 2, hermits: 1),
-        [5] = Content(portals: 7, coin: 0, gem: 3, statues: 1, shrines: 1, hermits: 1),
-    };
+        public readonly Dictionary<IslandThing, int> Counts;
+        public readonly string Puzzle;
 
-    private static Dictionary<IslandThing, int> Content(int portals, int coin, int gem, int statues, int shrines, int hermits) => new()
+        public Content(int coin, int gem, int portals, int statues, int shrines, int hermits, int rulers = 0, string puzzle = null)
+        {
+            Counts = new Dictionary<IslandThing, int>
+            {
+                [IslandThing.CoinChest] = coin, [IslandThing.GemChest] = gem, [IslandThing.Portal] = portals,
+                [IslandThing.Statue] = statues, [IslandThing.MountShrine] = shrines, [IslandThing.HermitCabin] = hermits,
+                [IslandThing.RulerStatue] = rulers,
+            };
+            Puzzle = puzzle;
+        }
+    }
+
+    public sealed class Campaign
     {
-        [IslandThing.Portal] = portals,
-        [IslandThing.CoinChest] = coin,
-        [IslandThing.GemChest] = gem,
-        [IslandThing.Statue] = statues,
-        [IslandThing.MountShrine] = shrines,
-        [IslandThing.HermitCabin] = hermits,
+        public string Key, Display;
+        public int BiomeIndex;
+        public Dictionary<int, Content> Islands = new();
+        public Content Totals; // campaign-wide content (Olympus)
+        public string[] Statues, Hermits, Mounts, Powers = System.Array.Empty<string>();
+        public int DogIsland = 2;
+
+        public bool CampaignWide => Totals != null;
+        public int IslandCount => Islands.Count;
+    }
+
+    private static readonly string[] StatuesBase = { "Statue of Archery", "Statue of Farming", "Statue of Building", "Statue of Knights" };
+    private static readonly string[] HermitsBase = { "Ballista Hermit", "Stable Hermit", "Bakery Hermit", "Warrior Hermit", "Horn Hermit" };
+
+    private static Dictionary<int, Content> BaseIslands() => new()
+    {
+        [1] = new Content(coin: 3, gem: 0, portals: 0, statues: 1, shrines: 1, hermits: 1),
+        [2] = new Content(coin: 2, gem: 3, portals: 2, statues: 1, shrines: 1, hermits: 1),
+        [3] = new Content(coin: 3, gem: 3, portals: 4, statues: 1, shrines: 2, hermits: 1),
+        [4] = new Content(coin: 1, gem: 3, portals: 6, statues: 0, shrines: 2, hermits: 1),
+        [5] = new Content(coin: 0, gem: 3, portals: 6, statues: 1, shrines: 1, hermits: 1),
     };
 
-    public static int ExpectedCount(int island, IslandThing thing) =>
-        IslandContent.TryGetValue(island, out var content) ? content[thing] : 0;
+    public static readonly Campaign[] Campaigns =
+    {
+        new()
+        {
+            Key = "two_crowns", Display = "Two Crowns", BiomeIndex = 0, Islands = BaseIslands(),
+            Statues = StatuesBase, Hermits = HermitsBase,
+            Mounts = new[] { "Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount", "Unicorn Mount" },
+        },
+        new()
+        {
+            Key = "shogun", Display = "Shogun", BiomeIndex = 1, Islands = BaseIslands(),
+            Statues = StatuesBase, Hermits = HermitsBase,
+            Mounts = new[] { "Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount", "Kirin Mount" },
+        },
+        new()
+        {
+            Key = "dead_lands", Display = "Dead Lands", BiomeIndex = 2,
+            Islands = new Dictionary<int, Content>
+            {
+                [1] = new Content(coin: 3, gem: 0, portals: 0, statues: 1, shrines: 1, hermits: 1),
+                [2] = new Content(coin: 2, gem: 3, portals: 2, statues: 1, shrines: 1, hermits: 1, rulers: 1),
+                [3] = new Content(coin: 3, gem: 3, portals: 4, statues: 1, shrines: 2, hermits: 1, rulers: 1),
+                [4] = new Content(coin: 1, gem: 3, portals: 6, statues: 0, shrines: 2, hermits: 1, rulers: 1),
+                [5] = new Content(coin: 0, gem: 3, portals: 6, statues: 1, shrines: 1, hermits: 1),
+            },
+            Statues = StatuesBase, Hermits = HermitsBase,
+            Mounts = new[] { "Gamigin Mount", "Stag Mount", "Bear Mount", "Golem Mount", "Lizard Mount", "Beetle Mount", "Unicorn Mount" },
+        },
+        new()
+        {
+            Key = "norselands", Display = "Norselands", BiomeIndex = 3,
+            Islands = new Dictionary<int, Content>
+            {
+                [1] = new Content(coin: 3, gem: 0, portals: 0, statues: 1, shrines: 1, hermits: 1, puzzle: "Heimdall"),
+                [2] = new Content(coin: 3, gem: 2, portals: 2, statues: 0, shrines: 2, hermits: 1),
+                [3] = new Content(coin: 2, gem: 2, portals: 4, statues: 1, shrines: 1, hermits: 1, puzzle: "Thor"),
+                [4] = new Content(coin: 1, gem: 2, portals: 4, statues: 1, shrines: 1, hermits: 1, puzzle: "Hel"),
+                [5] = new Content(coin: 1, gem: 2, portals: 6, statues: 1, shrines: 1, hermits: 0),
+                [6] = new Content(coin: 1, gem: 3, portals: 5, statues: 0, shrines: 1, hermits: 1, puzzle: "Loki"),
+            },
+            Statues = StatuesBase, Hermits = HermitsBase,
+            Mounts = new[] { "Hrimfaxe Mount", "Cat Cart Mount", "Reindeer Mount", "Sleipnir Mount", "Kelpie Mount", "Gullinbursti Mount", "Wolf Mount" },
+            Powers = new[] { "Power of Heimdall", "Power of Thor", "Power of Hel", "Power of Loki" },
+        },
+        new()
+        {
+            Key = "call_of_olympus", Display = "Call of Olympus", BiomeIndex = 5,
+            Totals = new Content(coin: 23, gem: 13, portals: 16, statues: 5, shrines: 12, hermits: 6),
+            Statues = StatuesBase.Append("Statue of Pikemen").ToArray(),
+            Hermits = HermitsBase.Append("Fire Hermit").ToArray(),
+            Mounts = new[]
+            {
+                "Stamina Horse", "Bear Mount", "Stag Mount", "Griffin Mount", "Molossian Hound Mount", "Chimera Mount",
+                "Spider Mount", "Donkey Mount", "Cerberus Mount", "Hippocampus Mount", "Chariot Mount", "Pegasus Mount",
+            },
+            Powers = new[] { "Power of Artemis", "Power of Athena", "Power of Hephaestus", "Power of Hermes" },
+            DogIsland = 0,
+        },
+    };
 
-    public static string IslandThingLocation(int island, IslandThing thing, int k) => $"Island {island}: {IslandThingNames[thing]} {k}";
+    public static Campaign CampaignByKey(string key) => Campaigns.FirstOrDefault(c => c.Key == key) ?? Campaigns[0];
+
+    public static string MountItem(Campaign campaign, SteedType type)
+    {
+        if (!MountItems.TryGetValue(type, out var item)) return null;
+        if (campaign.Key == "shogun" && item == "Unicorn Mount") item = "Kirin Mount";
+        return System.Array.IndexOf(campaign.Mounts, item) >= 0 ? item : null;
+    }
+
+    public static string PowerItem(Campaign campaign, ItemOfPower.ItemType type) =>
+        PowerItems.TryGetValue(type, out var item) && System.Array.IndexOf(campaign.Powers, item) >= 0 ? item : null;
+
+    public static string StatueItem(Campaign campaign, Statue.Deity deity) =>
+        StatueItems.TryGetValue(deity, out var item) && System.Array.IndexOf(campaign.Statues, item) >= 0 ? item : null;
+
+    public static string HermitItem(Campaign campaign, Hermit.HermitType type) =>
+        HermitItems.TryGetValue(type, out var item) && System.Array.IndexOf(campaign.Hermits, item) >= 0 ? item : null;
+
+    public static int ExpectedCount(Campaign campaign, int island, IslandThing thing)
+    {
+        if (campaign.CampaignWide) return campaign.Totals.Counts[thing];
+        return campaign.Islands.TryGetValue(island, out var content) ? content.Counts[thing] : 0;
+    }
+
+    // --- Location names (apworld locations.py) ---
+
+    public static string IslandThingLocation(Campaign campaign, int island, IslandThing thing, int k) =>
+        campaign.CampaignWide ? $"{IslandThingNames[thing]} {k}" : $"Island {island}: {IslandThingNames[thing]} {k}";
+
     public static string IslandThingLabel(IslandThing thing) => IslandThingNames[thing];
 
     public static string BoatLocation(int island) => $"Island {island}: Build the Boat";
     public static string ArriveLocation(int island) => $"Island {island}: Arrive";
     public static string LiberateLocation(int island) => $"Island {island}: Liberate";
-    public const string DogLocation = "Island 2: Free the Dog";
+    public static string PuzzleLocation(int island, string god) => $"Island {island}: {god}'s Puzzle";
+    public static string DogLocation(Campaign campaign) => campaign.CampaignWide ? "Free the Dog" : "Island 2: Free the Dog";
     public const string FullUpgradeLocation = "Fully Upgrade an Island";
     public static string CastleLevelLocation(int level) => $"Castle Level {level}";
-    public static string ForestLocation(int k) => $"Clear Forest {k}";
+
+    // Call of Olympus: level config name -> island name used in "Reach ..." checks.
+    public static readonly Dictionary<string, string> OlympusIslands = new()
+    {
+        ["Greece_Land_God_Artemis"] = "Artemis's Island",
+        ["Greece_Land_God_Athena"] = "Athena's Island",
+        ["Greece_Land_God_Hephaestus"] = "Hephaestus's Island",
+        ["Greece_Land_God_Hermes"] = "Hermes's Island",
+        ["Greece_Land_Quest_Artemis"] = "Artemis's Quest Island",
+        ["Greece_Land_Quest_Athena"] = "Athena's Quest Island",
+        ["Greece_Land_Quest_Hephaestus"] = "Hephaestus's Quest Island",
+        ["Greece_Land_Quest_Hermes"] = "Hermes's Quest Island",
+        ["Greece_Land_MtOlympus_Serpent"] = "Mount Olympus",
+    };
+
+    public static string OlympusReachLocation(string island) => $"Reach {island}";
+
+    // Call of Olympus quests that send a check when completed.
+    public static readonly Dictionary<QuestType, string> OlympusQuests = new()
+    {
+        [QuestType.OracleIsland] = "Complete the Oracle's Quest",
+        [QuestType.GodIslandArtemis] = "Complete Artemis's Island Quest",
+        [QuestType.GodIslandAthena] = "Complete Athena's Island Quest",
+        [QuestType.GodIslandHephaestus] = "Complete Hephaestus's Island Quest",
+        [QuestType.GodIslandHermes] = "Complete Hermes's Island Quest",
+        [QuestType.Artemis] = "Complete Artemis's Quest",
+        [QuestType.Athena] = "Complete Athena's Quest",
+        [QuestType.Hephaestus] = "Complete Hephaestus's Quest",
+        [QuestType.Hermes] = "Complete Hermes's Quest",
+        [QuestType.MtOlympusSerpent] = "Defeat the World Serpent",
+    };
+
+    public const string OlympusGoalLocation = "Defeat the World Serpent";
 
     public enum Milestone { Greed, Greedlings, Floaters, Breeders, CrownStealers, Nights, Trees }
 

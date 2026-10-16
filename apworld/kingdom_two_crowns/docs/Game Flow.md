@@ -1,3 +1,6 @@
+> Early hand-written notes, kept for history. The authoritative per-island numbers (taken from the game's level
+> configs) are in `campaigns.py`; in particular the portal counts below include each island's cliff portal.
+
 Island 1 Element       
  - S: Archery          Coin Cost: 10   Gem Cost: 3
  - M: Griffin          Coin Cost: 8    Gem Cost: 2

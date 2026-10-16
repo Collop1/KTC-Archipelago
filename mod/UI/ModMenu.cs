@@ -21,8 +21,8 @@ public class ModMenu : MonoBehaviour
 
     private static readonly KeyCode[] MenuKeys =
     {
-        KeyCode.F2, KeyCode.F5, KeyCode.F6, KeyCode.F7, KeyCode.F8, KeyCode.F9, KeyCode.F10, KeyCode.F11,
-        KeyCode.Insert, KeyCode.Home, KeyCode.BackQuote,
+        KeyCode.F1, KeyCode.F2, KeyCode.F3, KeyCode.F4, KeyCode.F5, KeyCode.F6, KeyCode.F7, KeyCode.F8, KeyCode.F9,
+        KeyCode.F10, KeyCode.F11, KeyCode.Insert, KeyCode.Home, KeyCode.BackQuote,
     };
 
     private const int WindowId = 734022;
@@ -42,6 +42,15 @@ public class ModMenu : MonoBehaviour
     private bool _showPassword;
     private string _toast = "";
     private float _toastUntil;
+
+    // Window scale is only applied once the slider is let go; rescaling mid-drag moves the slider out from
+    // under the mouse.
+    private bool _draggingScale;
+    private float _pendingScale;
+
+    // Background alpha for everything drawn inside the window (GUI.Window runs its contents after OnGUI has
+    // already restored GUI.backgroundColor, so it has to be set again in there).
+    private static float _opacity = 1f;
 
     private readonly TextInput _host = new() { Placeholder = "archipelago.gg:38281" };
     private readonly TextInput _slot = new() { Placeholder = "your slot name" };
@@ -78,6 +87,13 @@ public class ModMenu : MonoBehaviour
 
         if (!TextInput.AnyFocused && Input.GetKeyDown((KeyCode)ClientSettings.Current.MenuKey))
             SetVisible(!_visible);
+
+        if (_draggingScale && !Input.GetMouseButton(0))
+        {
+            _draggingScale = false;
+            ClientSettings.Current.WindowScale = _pendingScale;
+            ClientSettings.Save();
+        }
     }
 
     private void SetVisible(bool visible)
@@ -86,6 +102,7 @@ public class ModMenu : MonoBehaviour
         if (!visible)
         {
             TextInput.ClearFocus();
+            UiBlocker.Hide();
             SaveWindow();
         }
         try
@@ -121,16 +138,22 @@ public class ModMenu : MonoBehaviour
         _rect.x = Mathf.Clamp(_rect.x, 0f, Mathf.Max(0f, maxW - 80f));
         _rect.y = Mathf.Clamp(_rect.y, 0f, Mathf.Max(0f, maxH - 60f));
 
-        GUI.backgroundColor = new Color(1f, 1f, 1f, Mathf.Clamp(s.MenuOpacity, 0.3f, 1f));
+        _opacity = Mathf.Clamp(s.MenuOpacity, 0.3f, 1f);
+        GUI.backgroundColor = new Color(1f, 1f, 1f, _opacity);
         _windowFunc ??= (Action<int>)DrawWindow;
         _rect = GUI.Window(WindowId, _rect, _windowFunc, GUIContent.none, Styles.Window);
 
         GUI.backgroundColor = oldBg;
         GUI.matrix = oldMatrix;
+
+        // Keep the game's own UI (e.g. the pause menu) from taking clicks meant for this window.
+        if (Event.current.type == EventType.Repaint)
+            UiBlocker.Cover(new Rect(_rect.x * scale, _rect.y * scale, _rect.width * scale, _rect.height * scale));
     }
 
     private void DrawWindow(int id)
     {
+        GUI.backgroundColor = new Color(1f, 1f, 1f, _opacity);
         try
         {
             GUILayout.BeginVertical();
@@ -262,7 +285,8 @@ public class ModMenu : MonoBehaviour
     private static bool Pill(bool on, string onText = "ON", string offText = "OFF")
     {
         var old = GUI.backgroundColor;
-        GUI.backgroundColor = on ? Styles.On : Styles.Off;
+        var tint = on ? Styles.On : Styles.Off;
+        GUI.backgroundColor = new Color(tint.r, tint.g, tint.b, _opacity);
         bool clicked = GUILayout.Button(on ? onText : offText, Styles.Pill, GUILayout.Width(64f));
         GUI.backgroundColor = old;
         return clicked;
@@ -385,9 +409,14 @@ public class ModMenu : MonoBehaviour
             Row("Server", AP.Escape(AP.HostConnectedTo));
             Row("Checks", $"{AP.CheckedCount} / {AP.LocationCount}");
             Row("Items received", AP.Received.Count.ToString());
-            int liberated = Enumerable.Range(1, GameData.IslandCount).Count(GameAccess.IsIslandSecured);
-            Row("Goal", $"Liberate {AP.Slot.IslandsToLiberate} island(s), {liberated} done");
-            Row("Island unlocks", AP.Slot.IslandUnlocks ? "On (islands are items)" : "Off (islands open in order)");
+            var campaign = AP.Slot.Campaign;
+            Row("Campaign", campaign.Display);
+            if (campaign.CampaignWide)
+                Row("Goal", "Defeat the World Serpent on Mount Olympus");
+            else
+                Row("Goal", $"Liberate {AP.Slot.GoalIslands} island(s), {CheckTracker.LiberatedIslands()} done");
+            if (!campaign.CampaignWide)
+                Row("Island unlocks", AP.Slot.UsesIslandUnlocks ? "On (islands are items)" : "Off (islands open in order)");
             GUILayout.BeginHorizontal();
             GUILayout.Label("DeathLink", Styles.Body, GUILayout.Width(190f));
             if (Pill(AP.DeathLinkOn)) AP.SetDeathLink(!AP.DeathLinkOn);
@@ -395,11 +424,15 @@ public class ModMenu : MonoBehaviour
             GUILayout.EndHorizontal();
             EndCard();
         }
+        DrawCampaignWarning();
+    }
 
-        BeginCard("HOW TO");
-        GUILayout.Label($"Press <b>{(KeyCode)s.MenuKey}</b> to open or close this menu (change it in Settings).", Styles.Small);
-        GUILayout.Label("Click a box to type. Enter submits, Esc stops typing, Ctrl+V pastes, Ctrl+Backspace clears. Your monarch won't move while you type.", Styles.Small);
-        GUILayout.Label("Received and sent items also pop up in the corner feed, so you only need this menu to connect, hint, chat or check progress.", Styles.Small);
+    private static void DrawCampaignWarning()
+    {
+        if (GameAccess.CampaignMatches) return;
+        BeginCard("WRONG CAMPAIGN");
+        GUILayout.Label($"<color={Styles.HexBad}>This seed is for {AP.Slot.Campaign.Display}, but the game has a different campaign loaded.</color> " +
+                        "Checks, items and locks are paused until you load or start a " + AP.Slot.Campaign.Display + " campaign.", Styles.Body);
         EndCard();
     }
 
@@ -411,9 +444,13 @@ public class ModMenu : MonoBehaviour
         int castle = ItemHandler.Count(GameData.ProgressiveCastle);
         Row("Castle upgrades", $"{castle} / {GameData.MaxCastleUpgrades}   <color={Styles.HexDim}>(castle can reach level {Math.Min(7, castle + 1)})</color>");
         Row("Technology", $"{Check(ItemHandler.Has(GameData.StoneTech))} Stone   {Check(ItemHandler.Has(GameData.IronTech))} Iron");
-        var islands = string.Join("   ", Enumerable.Range(1, GameData.IslandCount).Select(i => $"{Check(Gating.IsIslandUnlocked(i))} {i}"));
-        Row("Islands", AP.Slot.IslandUnlocks ? islands : "All open (in order)");
-        foreach (var group in GameData.ItemGroups.Where(g => g.Title is "Statues" or "Hermits" or "Mounts"))
+        var campaign = AP.Slot.Campaign;
+        if (!campaign.CampaignWide)
+        {
+            var islands = string.Join("   ", Enumerable.Range(1, campaign.IslandCount).Select(i => $"{Check(Gating.IsIslandUnlocked(i))} {i}"));
+            Row("Islands", AP.Slot.UsesIslandUnlocks ? islands : "All open (in order)");
+        }
+        foreach (var group in GameData.ItemGroupsFor(campaign).Where(g => g.Title is "Statues" or "Hermits" or "Mounts" or "Powers"))
         {
             GUILayout.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
@@ -458,6 +495,7 @@ public class ModMenu : MonoBehaviour
     {
         int island = GameAccess.CurrentIsland;
 
+        DrawCampaignWarning();
         BeginCard("PROGRESS");
         Row("Checks done", AP.Connected ? $"{AP.CheckedCount} / {AP.LocationCount}" : "connect to see");
         Row("Current island", island > 0 ? island.ToString() : "-");
@@ -477,21 +515,38 @@ public class ModMenu : MonoBehaviour
                 : $"<color={Styles.HexGood}>all {count} done</color>";
             Row(GameData.Milestones[milestone].Label, $"<b>{value}</b>   {nextText}");
         }
-        if (AP.Slot.ForestChecks > 0)
-            Row("Forests cleared", $"<b>{AP.State.Counter(CheckTracker.ForestCounter)}</b> / {AP.Slot.ForestChecks}");
         EndCard();
 
-        if (island > 0)
+        var campaign = AP.Slot.Campaign;
+        if (campaign.CampaignWide)
+        {
+            BeginCard($"{campaign.Display.ToUpperInvariant()} (WHOLE CAMPAIGN)");
+            foreach (GameData.IslandThing thing in Enum.GetValues(typeof(GameData.IslandThing)))
+            {
+                int expected = GameData.ExpectedCount(campaign, 0, thing);
+                if (expected == 0) continue;
+                int done = Enumerable.Range(1, expected).Count(k => AP.IsChecked(GameData.IslandThingLocation(campaign, 0, thing, k)));
+                Row(GameData.IslandThingLabel(thing), $"{done} / {expected} checked");
+            }
+            foreach (var quest in GameData.OlympusQuests.Values)
+                Row(quest, Check(AP.IsChecked(quest)));
+            int offset = AP.State.WaveOffset(island);
+            if (offset > 0) Row("Waves Gone By", $"<color={Styles.HexTrap}>+{offset} days on this island</color>");
+            EndCard();
+        }
+        else if (island > 0)
         {
             BeginCard($"ISLAND {island}");
             foreach (GameData.IslandThing thing in Enum.GetValues(typeof(GameData.IslandThing)))
             {
-                int expected = GameData.ExpectedCount(island, thing);
+                int expected = GameData.ExpectedCount(campaign, island, thing);
                 if (expected == 0) continue;
                 AP.State.CountedPositions.TryGetValue($"{thing}@{island}", out var seen);
-                int done = Enumerable.Range(1, expected).Count(k => AP.IsChecked(GameData.IslandThingLocation(island, thing, k)));
+                int done = Enumerable.Range(1, expected).Count(k => AP.IsChecked(GameData.IslandThingLocation(campaign, island, thing, k)));
                 Row(GameData.IslandThingLabel(thing), $"{done} / {expected} checked  <color={Styles.HexDim}>({seen?.Count ?? 0} found here)</color>");
             }
+            if (campaign.Islands.TryGetValue(island, out var content) && content.Puzzle != null)
+                Row($"{content.Puzzle}'s Puzzle", Check(AP.IsChecked(GameData.PuzzleLocation(island, content.Puzzle))));
             Row("Build the Boat", Check(AP.IsChecked(GameData.BoatLocation(island))));
             if (island > 1) Row("Arrive", Check(AP.IsChecked(GameData.ArriveLocation(island))));
             Row("Liberate", Check(AP.IsChecked(GameData.LiberateLocation(island))));
@@ -549,8 +604,8 @@ public class ModMenu : MonoBehaviour
         if (ItemHandler.Count(GameData.ProgressiveCastle) < GameData.MaxCastleUpgrades) wanted.Add(GameData.ProgressiveCastle);
         if (!ItemHandler.Has(GameData.StoneTech)) wanted.Add(GameData.StoneTech);
         if (!ItemHandler.Has(GameData.IronTech)) wanted.Add(GameData.IronTech);
-        if (AP.Slot.IslandUnlocks)
-            for (int i = 2; i <= GameData.IslandCount; i++)
+        if (AP.Slot.UsesIslandUnlocks)
+            for (int i = 2; i <= AP.Slot.Campaign.IslandCount; i++)
                 if (!ItemHandler.Has(GameData.IslandUnlock(i))) wanted.Add(GameData.IslandUnlock(i));
         if (wanted.Count > 0)
         {
@@ -661,7 +716,7 @@ public class ModMenu : MonoBehaviour
         EndCard();
 
         BeginCard("GIVE ITEM");
-        foreach (var group in GameData.ItemGroups)
+        foreach (var group in GameData.ItemGroupsFor(AP.Slot.Campaign))
         {
             GUILayout.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
@@ -687,7 +742,6 @@ public class ModMenu : MonoBehaviour
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("+1 Night", Styles.ButtonSmall)) CheckTracker.AddMilestone(GameData.Milestone.Nights);
         if (GUILayout.Button("+5 Trees", Styles.ButtonSmall)) CheckTracker.AddMilestone(GameData.Milestone.Trees, 5);
-        if (GUILayout.Button("+1 Forest", Styles.ButtonSmall)) CheckTracker.OnForestCleared(new IntPtr(Environment.TickCount));
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("+5 Greedlings", Styles.ButtonSmall)) for (int i = 0; i < 5; i++) CheckTracker.OnEnemyKilled(EnemyType.TrollWeak);
@@ -703,6 +757,7 @@ public class ModMenu : MonoBehaviour
         if (GUILayout.Button("Skip to night", Styles.ButtonSmall)) SkipTime(toNight: true);
         if (GUILayout.Button("Skip to day", Styles.ButtonSmall)) SkipTime(toNight: false);
         if (GUILayout.Button("Refresh island census", Styles.ButtonSmall)) _census = Census();
+        if (GUILayout.Button("Dump campaign data", Styles.ButtonSmall)) Toast("Written to " + CampaignDump.Run());
         GUILayout.EndHorizontal();
         GUILayout.Label(_census, Styles.Small);
         EndCard();
@@ -762,8 +817,12 @@ public class ModMenu : MonoBehaviour
             }
             var campaign = CampaignSaveData.current;
             if (campaign != null) Row("Campaign", $"furthest land {campaign.furthestUnlockedLand}, current {campaign.currentLand}");
-            var secured = string.Join(" ", Enumerable.Range(1, GameData.IslandCount).Select(i => $"{i}:{(GameAccess.IsIslandSecured(i) ? "yes" : "no")}"));
-            Row("Islands liberated", secured);
+            Row("Campaign", $"seed: {AP.Slot.Campaign.Display} (biome {AP.Slot.Campaign.BiomeIndex}), loaded biome {GameAccess.BiomeIndex}, level '{GameAccess.CurrentLevelConfigName}'");
+            if (!AP.Slot.Campaign.CampaignWide)
+            {
+                var secured = string.Join(" ", Enumerable.Range(1, AP.Slot.Campaign.IslandCount).Select(i => $"{i}:{(GameAccess.IsIslandSecured(i) ? "yes" : "no")}"));
+                Row("Islands liberated", secured);
+            }
             Row("Wave offset here", $"+{AP.State.WaveOffset(GameAccess.CurrentIsland)} days");
             Row("Gating", $"{(Gating.Active ? "active" : "off")}, islands {(Gating.IslandGatingActive ? "gated" : "open")}");
             if (GameAccess.CastleLevel >= 7) Row("Full upgrade", CheckTracker.FullUpgradeStatus().Detail);
@@ -809,7 +868,8 @@ public class ModMenu : MonoBehaviour
             int cabins = Object.FindObjectsByType<Cabin>(FindObjectsSortMode.None).Length;
             var walls = Object.FindObjectsByType<Wall>(FindObjectsSortMode.None).Where(w => w != null).Select(w => w.level).OrderBy(l => l).ToList();
             int towers = Object.FindObjectsByType<Tower>(FindObjectsSortMode.None).Length;
-            string Expect(GameData.IslandThing t) => island > 0 ? $"/{GameData.ExpectedCount(island, t)}" : "";
+            var campaign = AP.Slot.Campaign;
+            string Expect(GameData.IslandThing t) => island > 0 && !campaign.CampaignWide ? $"/{GameData.ExpectedCount(campaign, island, t)}" : "";
             var text =
                 $"Island {island}: portals {regular}{Expect(GameData.IslandThing.Portal)} (+{cliff} cliff), " +
                 $"coin chests {coin}{Expect(GameData.IslandThing.CoinChest)}, gem chests {gem}{Expect(GameData.IslandThing.GemChest)}, " +
@@ -833,9 +893,14 @@ public class ModMenu : MonoBehaviour
         bool changed = false;
 
         BeginCard("MENU");
-        float scale = SliderRow("Window scale", s.WindowScale, 0.6f, 2f, "F2");
-        float opacity = SliderRow("Menu opacity", s.MenuOpacity, 0.4f, 1f, "F2");
-        if (Math.Abs(scale - s.WindowScale) > 0.001f) { s.WindowScale = scale; changed = true; }
+        float shownScale = _draggingScale ? _pendingScale : s.WindowScale;
+        float scale = SliderRow("Window scale", shownScale, 0.6f, 2f, "F2");
+        if (Math.Abs(scale - shownScale) > 0.001f)
+        {
+            _pendingScale = scale;
+            _draggingScale = true; // applied in Update once the mouse button is released
+        }
+        float opacity = SliderRow("Menu opacity", s.MenuOpacity, 0.3f, 1f, "F2");
         if (Math.Abs(opacity - s.MenuOpacity) > 0.001f) { s.MenuOpacity = opacity; changed = true; }
         GUILayout.BeginHorizontal();
         GUILayout.Label("Menu key", Styles.Body, GUILayout.Width(170f));
@@ -845,12 +910,13 @@ public class ModMenu : MonoBehaviour
             s.MenuKey = (int)MenuKeys[(i + 1) % MenuKeys.Length];
             changed = true;
         }
-        GUILayout.Label("<color=#998C73>(F1, F3 and F4 belong to Kingdom Enhanced)</color>", Styles.Small);
+        GUILayout.Label("<color=#998C73>(if you also run Kingdom Enhanced, it uses F1, F3 and F4)</color>", Styles.Small);
         GUILayout.EndHorizontal();
         if (GUILayout.Button("Reset window size and position", Styles.ButtonSmall, GUILayout.Width(240f)))
         {
             _rect = new Rect(40f, 90f, 680f, 520f);
             s.WindowScale = 1f;
+            _draggingScale = false;
             changed = true;
             SaveWindow();
         }
@@ -878,10 +944,6 @@ public class ModMenu : MonoBehaviour
         if (Math.Abs(feedScale - s.FeedScale) > 0.001f) { s.FeedScale = feedScale; changed = true; }
         if (GUILayout.Button("Show a test notification", Styles.ButtonSmall, GUILayout.Width(200f)))
             Feed.Add($"<color={Styles.HexMe}>{AP.Escape(string.IsNullOrEmpty(AP.SlotName) ? "Monarch" : AP.SlotName)}</color> found their <color={Styles.HexProgression}>Stone Technology</color> (<color={Styles.HexLocation}>Island 1: Coin Chest 1</color>)");
-        EndCard();
-
-        BeginCard("FILES");
-        GUILayout.Label($"Settings and per-seed progress are saved in {AP.Escape(Storage.Folder)}. The old APKingdom2Crown.cfg is no longer used and can be deleted.", Styles.Dim);
         EndCard();
 
         if (changed) _settingsDirtyUntil = Time.unscaledTime + 1f;

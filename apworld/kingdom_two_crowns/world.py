@@ -3,13 +3,15 @@ from typing import Any
 from worlds.AutoWorld import World
 
 from . import items, locations, regions, rules
+from .campaigns import CAMPAIGN_BY_OPTION, CAMPAIGNS, Campaign
 from .items import KingdomTwoCrownsItem
 from .locations import MILESTONES
 from .options import KingdomTwoCrownsOptions
+from .regions import OLYMPUS_REGION
 from .web_world import KingdomTwoCrownsWebWorld
 
 # Bump when slot_data changes shape so the mod can warn about a mismatched apworld.
-SLOT_DATA_VERSION = 2
+SLOT_DATA_VERSION = 3
 
 
 class KingdomTwoCrownsWorld(World):
@@ -33,6 +35,16 @@ class KingdomTwoCrownsWorld(World):
 
     origin_region_name = "Menu"
 
+    campaign: Campaign
+
+    def generate_early(self) -> None:
+        self.campaign = CAMPAIGNS[CAMPAIGN_BY_OPTION[self.options.campaign.value]]
+
+    @property
+    def home_region(self) -> str:
+        """Where global checks (castle levels, milestones) live: always reachable."""
+        return OLYMPUS_REGION if self.campaign.is_campaign_wide else "Island 1"
+
     def create_regions(self) -> None:
         regions.create_and_connect_regions(self)
         locations.create_all_locations(self)
@@ -52,10 +64,11 @@ class KingdomTwoCrownsWorld(World):
     def fill_slot_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "slot_data_version": SLOT_DATA_VERSION,
+            "campaign": self.campaign.key,
+            "biome_index": self.campaign.biome_index,
             **self.options.as_dict(
                 "islands_to_liberate",
                 "island_unlocks",
-                "forest_checks",
                 "waves_gone_by_days",
                 "vagrants_per_item",
                 "death_link",

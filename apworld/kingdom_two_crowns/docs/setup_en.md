@@ -23,7 +23,9 @@
 1. In the **Connect** tab, click each box and type the server address (for example `archipelago.gg:38281`), your
    slot name and the room password if it has one.
 2. Click **Connect**. The details are remembered for next time, and you can turn on auto-connect.
-3. Start or continue a campaign. Checks you make while disconnected are saved and sent when you reconnect.
+3. Start a new campaign of the kind your YAML's `campaign` option names (Two Crowns, Shogun, Dead Lands, Norselands or
+   Call of Olympus). If a different campaign is loaded, the menu says so and nothing is sent or received until you
+   switch. Checks you make while disconnected are saved and sent when you reconnect.
 
-The menu key can be changed in the **Settings** tab (Kingdom Enhanced uses F1, F3 and F4, so both mods work side by
-side). Settings and per-seed progress live in `BepInEx/config/APKingdom2Crown/`; there is no config file to edit.
+The menu key can be changed in the **Settings** tab. If you also run Kingdom Enhanced, avoid F1, F3 and F4, which it
+uses. Settings and per-seed progress live in `BepInEx/config/APKingdom2Crown/`; there is no config file to edit.

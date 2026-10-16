@@ -1,13 +1,15 @@
 """Region layout for Kingdom Two Crowns.
 
-Menu -> Island 1 is free. Islands 2-5 either need their "Island N Unlock" item (island_unlocks on) or open
-up in order like the base game (island_unlocks off: reach island N-1, build the boat, sail on).
-
+Numbered-island campaigns: Menu -> Island 1 is free. The other islands either need their "Island N Unlock"
+item (island_unlocks on) or open up in order like the base game (reach island N-1, build the boat, sail on).
 Global checks (castle levels, milestones) live in Island 1 since you can always do them at home.
+
+Call of Olympus opens its islands through its own quests, so it's a single region and island_unlocks
+doesn't apply.
 """
 from BaseClasses import Region
 
-from .locations import ISLANDS
+OLYMPUS_REGION = "Olympus"
 
 
 def island_unlock_item(island: int) -> str:
@@ -17,16 +19,24 @@ def island_unlock_item(island: int) -> str:
 def create_and_connect_regions(world) -> None:
     player = world.player
     multiworld = world.multiworld
+    campaign = world.campaign
 
     menu = Region("Menu", player, multiworld)
     multiworld.regions.append(menu)
+
+    if campaign.is_campaign_wide:
+        olympus = Region(OLYMPUS_REGION, player, multiworld)
+        multiworld.regions.append(olympus)
+        menu.connect(olympus, "Start Reign")
+        return
+
     islands = {}
-    for island in ISLANDS:
+    for island in campaign.islands:
         islands[island] = Region(f"Island {island}", player, multiworld)
         multiworld.regions.append(islands[island])
 
     menu.connect(islands[1], "Start Reign")
-    for island in ISLANDS:
+    for island in campaign.islands:
         if island == 1:
             continue
         if world.options.island_unlocks:

@@ -104,6 +104,18 @@ internal static class WharfLaunchBoatPatch
     }
 }
 
+// Trees count only once a builder has worked on them and they then fall.
+[HarmonyPatch(typeof(WorkableTree), nameof(WorkableTree.OnJobFinish))]
+internal static class TreeWorkedPatch
+{
+    // Prefix: the final swing may collapse the tree inside OnJobFinish itself.
+    private static void Prefix(WorkableTree __instance)
+    {
+        try { CheckTracker.OnTreeWorked(__instance.Pointer); }
+        catch (Exception e) { Plugin.Log.LogError($"[AP] Tree work patch: {e}"); }
+    }
+}
+
 [HarmonyPatch(typeof(WorkableTree), nameof(WorkableTree.CollapseTree))]
 internal static class TreeCollapsePatch
 {
@@ -111,25 +123,9 @@ internal static class TreeCollapsePatch
     {
         try
         {
-            if (GameAccess.IsPlaying) CheckTracker.OnTreeFelled(__instance.Pointer);
+            if (GameAccess.IsPlaying) CheckTracker.OnTreeCollapsed(__instance.Pointer, __instance.transform.position.x);
         }
         catch (Exception e) { Plugin.Log.LogError($"[AP] Tree patch: {e}"); }
-    }
-}
-
-[HarmonyPatch(typeof(Forest), nameof(Forest.RemoveAndUpdate))]
-internal static class ForestRemovePatch
-{
-    private static void Postfix(Forest __instance)
-    {
-        try
-        {
-            // Forests also empty out while an island is being unloaded, so only count it mid-game.
-            if (!GameAccess.IsPlaying) return;
-            var items = __instance._forestItems;
-            if (items != null && items.Count == 0) CheckTracker.OnForestCleared(__instance.Pointer);
-        }
-        catch (Exception e) { Plugin.Log.LogError($"[AP] Forest patch: {e}"); }
     }
 }
 

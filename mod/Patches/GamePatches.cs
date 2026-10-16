@@ -129,11 +129,12 @@ internal static class SetCurrentLandPatch
 
             int current = GameAccess.CurrentIsland;
             int best = 0;
-            for (int distance = 1; distance < GameData.IslandCount && best == 0; distance++)
+            int count = AP.Slot.Campaign.IslandCount;
+            for (int distance = 1; distance < count && best == 0; distance++)
             {
                 foreach (var candidate in new[] { target + distance, target - distance })
                 {
-                    if (candidate < 1 || candidate > GameData.IslandCount || candidate == current) continue;
+                    if (candidate < 1 || candidate > count || candidate == current) continue;
                     if (!Gating.IsIslandUnlocked(candidate)) continue;
                     best = candidate;
                     break;

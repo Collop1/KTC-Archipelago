@@ -77,7 +77,8 @@ internal static class GameAccess
         }
     }
 
-    // 1-5, or 0 if unknown.
+    // Island number (1-5, or 1-6 in Norselands), or 0 if unknown. In Call of Olympus this is just the land
+    // index + 1 and only used to tell islands apart.
     public static int CurrentIsland
     {
         get
@@ -85,7 +86,39 @@ internal static class GameAccess
             var land = CurrentLand;
             if (land < 0) return 0;
             var island = LandToIsland(land);
-            return island is >= 1 and <= GameData.IslandCount ? island : 0;
+            int max = AP.Slot.Campaign.CampaignWide ? 32 : AP.Slot.Campaign.IslandCount;
+            return island >= 1 && island <= max ? island : 0;
+        }
+    }
+
+    // Name of the loaded island's level config, e.g. "Greece_Land_God_Athena".
+    public static string CurrentLevelConfigName
+    {
+        get
+        {
+            try { return Game?.currentLevelConfig?.name ?? ""; }
+            catch { return ""; }
+        }
+    }
+
+    // The loaded campaign's biome (BiomeHolder.Biomes), or -1 if unknown.
+    public static int BiomeIndex
+    {
+        get
+        {
+            try { return BiomeHolder.Inst?.BiomeIndex ?? -1; }
+            catch { return -1; }
+        }
+    }
+
+    // False when connected to a seed for a different campaign than the one being played.
+    public static bool CampaignMatches
+    {
+        get
+        {
+            if (AP.State.IsOffline && !AP.Connected) return true;
+            int biome = BiomeIndex;
+            return biome < 0 || biome == AP.Slot.Campaign.BiomeIndex;
         }
     }
 
