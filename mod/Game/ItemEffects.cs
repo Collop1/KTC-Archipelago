@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using Random = UnityEngine.Random;
@@ -34,13 +35,13 @@ internal static class ItemEffects
     {
         var flavour = itemName switch
         {
-            "Sunken Gold" => "It's covered in seaweed and worth nothing.",
-            "Broken Crown" => "Someone else's bad night. Not yours. Yet.",
-            "Tuft of Grass" => "Your steed looks interested. You are not.",
-            "Greed Mask Shard" => "It's still warm.",
-            "Soggy Bread" => "Even the vagrants won't touch it.",
-            "Bent Arrow" => "Your archers politely decline.",
-            "Lost Banner" => "It belongs to a kingdom long gone.",
+            "Sunken Gold (Junk)" => "It's covered in seaweed and worth nothing.",
+            "Broken Crown (Junk)" => "Someone else's bad night. Not yours. Yet.",
+            "Tuft of Grass (Junk)" => "Your steed looks interested. You are not.",
+            "Greed Mask Shard (Junk)" => "It's still warm.",
+            "Soggy Bread (Junk)" => "Even the vagrants won't touch it.",
+            "Bent Arrow (Junk)" => "Your archers politely decline.",
+            "Lost Banner (Junk)" => "It belongs to a kingdom long gone.",
             _ => "It does nothing.",
         };
         Feed.Add($"<color=#AAAAAA>{AP.Escape(itemName)}: {flavour}</color>");
@@ -273,5 +274,281 @@ internal static class ItemEffects
         }
         catch { }
         return min == int.MaxValue ? 1 : min;
+    }
+
+    public static void StamDam(string source)
+    {
+        var steed = GameAccess.Player?.steed;
+        if (steed == null)
+        {
+            Trap("Stam Dam! ...but you're on foot.", source);
+            return;
+        }
+        steed.BecomeTired();
+        Trap("Stam Dam! Your mount is exhausted.", source);
+    }
+
+    // --- Bad king traps ---
+
+    private static string _beggarTag, _peasantTag;
+
+    // The game swaps a character for another kind by tag; find the tags for vagrants and plain villagers.
+    private static void FindCharacterTags()
+    {
+        if (_beggarTag != null && _peasantTag != null) return;
+        try
+        {
+            foreach (var pair in GameAccess.Holder.tagCharacterPairs)
+            {
+                var character = pair.Value;
+                if (character == null) continue;
+                if (_beggarTag == null && character.GetComponent<Beggar>() != null) _beggarTag = pair.Key;
+                else if (_peasantTag == null && character.GetComponent<Peasant>() != null) _peasantTag = pair.Key;
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogWarning($"[AP] Character tag lookup failed: {e.Message}"); }
+    }
+
+    private static bool HasJob(Character c) =>
+        c.GetComponent<Archer>() != null || c.GetComponent<Worker>() != null || c.GetComponent<Farmer>() != null || c.GetComponent<Pikeman>() != null;
+
+    // Subjects that can desert: villagers and anyone with a job, but not knights.
+    private static List<Character> Subjects(bool needJob)
+    {
+        var list = new List<Character>();
+        foreach (var c in Object.FindObjectsByType<Character>(FindObjectsSortMode.None))
+        {
+            if (c == null || !c.gameObject.activeInHierarchy) continue;
+            if (c.GetComponent<Beggar>() != null || c.GetComponent<Knight>() != null) continue;
+            bool job = HasJob(c);
+            if (needJob ? job : job || c.GetComponent<Peasant>() != null) list.Add(c);
+        }
+        return list;
+    }
+
+    public static void Desertion(string source, int amount)
+    {
+        FindCharacterTags();
+        if (_beggarTag == null)
+        {
+            Trap("Desertion! ...but nobody knows how to leave.", source);
+            return;
+        }
+        var subjects = Subjects(needJob: false);
+        int left = 0;
+        for (int i = 0; i < amount && subjects.Count > 0; i++)
+        {
+            var c = subjects[Random.Range(0, subjects.Count)];
+            subjects.Remove(c);
+            try
+            {
+                // Swap them for a vagrant the game's own way (so every job list lets go of them), then let the
+                // vagrant vanish a moment later rather than hang around town waiting for a coin.
+                var deserter = c.ReplaceBy(_beggarTag);
+                if (deserter != null) Deserters.Add((deserter.gameObject, Time.unscaledTime + DeserterLingerSeconds));
+                left++;
+            }
+            catch (Exception e) { Plugin.Log.LogWarning($"[AP] Desertion failed for {c.name}: {e.Message}"); }
+        }
+        Trap(left == 0 ? "Desertion! ...but you have no subjects to lose." : $"Desertion! {left} subject{(left == 1 ? "" : "s")} gave up and left your kingdom.", source);
+    }
+
+    private const float DeserterLingerSeconds = 1.5f;
+    private static readonly List<(GameObject Go, float When)> Deserters = new();
+
+    private static void TickDeserters()
+    {
+        for (int i = Deserters.Count - 1; i >= 0; i--)
+        {
+            var (go, when) = Deserters[i];
+            if (Time.unscaledTime < when) continue;
+            Deserters.RemoveAt(i);
+            if (go == null) continue;
+            try
+            {
+                var damageable = go.GetComponent<Damageable>();
+                if (damageable != null) damageable.DestroyNow();
+                else Object.Destroy(go);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"[AP] Deserter cleanup: {e.Message}");
+                try { Object.Destroy(go); } catch { }
+            }
+        }
+    }
+
+    public static void ToolTheft(string source, int amount)
+    {
+        int fromRacks = 0, fromHands = 0;
+
+        // Shop racks first.
+        foreach (var tool in Object.FindObjectsByType<DroppableTool>(FindObjectsSortMode.None))
+        {
+            if (fromRacks >= amount) break;
+            if (tool == null) continue;
+            var shop = tool.parentShopRef;
+            if (shop == null) continue;
+            try
+            {
+                shop.NotifyDroppableCollected(tool);
+                Object.Destroy(tool.gameObject);
+                fromRacks++;
+            }
+            catch (Exception e) { Plugin.Log.LogWarning($"[AP] Tool theft from rack failed: {e.Message}"); }
+        }
+
+        // Then out of your units' hands: they go back to being plain villagers.
+        if (fromRacks < amount)
+        {
+            FindCharacterTags();
+            if (_peasantTag != null)
+            {
+                var workers = Subjects(needJob: true);
+                while (fromRacks + fromHands < amount && workers.Count > 0)
+                {
+                    var c = workers[Random.Range(0, workers.Count)];
+                    workers.Remove(c);
+                    try
+                    {
+                        c.ReplaceBy(_peasantTag);
+                        fromHands++;
+                    }
+                    catch (Exception e) { Plugin.Log.LogWarning($"[AP] Tool theft from {c.name} failed: {e.Message}"); }
+                }
+            }
+        }
+
+        int total = fromRacks + fromHands;
+        Trap(total == 0
+            ? "Tool Theft! ...but there was nothing to steal."
+            : $"Tool Theft! The Greed stole {total} tool{(total == 1 ? "" : "s")} ({fromRacks} from the racks, {fromHands} from your people).", source);
+    }
+
+    // --- DeathLink ---
+
+    private static float _crownFlingUntil;
+    private static float _crownFlingX;
+
+    // What someone else's death does to you: your purse is emptied (coins gone, gems stolen until you liberate the
+    // island) and/or your crown is flung off screen towards the nearest portal.
+    public static void DeathLink(string source, bool crown, bool wallet)
+    {
+        var player = GameAccess.Player;
+        if (player == null) return;
+        LastDeathLinkEffectTime = Time.unscaledTime;
+
+        var parts = new List<string>();
+        if (wallet) parts.Add(EmptyPurse(player));
+        if (crown) parts.Add(FlingCrown(player));
+        parts.RemoveAll(string.IsNullOrEmpty);
+        Trap("DeathLink! " + (parts.Count > 0 ? string.Join(" ", parts) : "...but you had nothing to lose."), source);
+    }
+
+    private static string EmptyPurse(Player player)
+    {
+        var wallet = player.wallet;
+        if (wallet == null) return "";
+        int coins = wallet.Coins;
+        if (coins > 0) wallet.RemoveCurrency(CurrencyType.Coins, coins);
+        var gems = StolenGems.Steal(wallet);
+        var coinText = coins > 0 ? $"Your {coins} coin{(coins == 1 ? " is" : "s are")} gone." : "";
+        return string.Join(" ", new[] { coinText, gems }.Where(t => t.Length > 0));
+    }
+
+    private static string FlingCrown(Player player)
+    {
+        if (!player.hasCrown) return "";
+
+        // Four half-screens away: well out of sight. Towards the nearest live portal if there is one, but not
+        // right on top of it; otherwise the way you're facing.
+        float px = player.transform.position.x;
+        float view = HalfViewWidth(player);
+        float distance = view * 4f;
+        float dir = GameAccess.FacingDirection(player);
+        float nearest = float.MaxValue;
+        foreach (var portal in Object.FindObjectsByType<Portal>(FindObjectsSortMode.None))
+        {
+            if (portal == null || portal.type == Portal.Type.Dock) continue;
+            if (portal.state is Portal.State.Destroyed or Portal.State.Crumbled) continue;
+            float d = Mathf.Abs(portal.transform.position.x - px);
+            if (d >= nearest) continue;
+            nearest = d;
+            dir = Mathf.Sign(portal.transform.position.x - px);
+        }
+        if (nearest < float.MaxValue) distance = Mathf.Min(distance, nearest - view * 0.5f);
+        distance = Mathf.Max(distance, view * 1.1f);
+
+        float target = ClampToLevel(px + dir * distance);
+        player.LoseCrown(new Vector2(dir * 8f, 8f), false, false);
+        _crownFlingX = target;
+        _crownFlingUntil = Time.unscaledTime + 2f; // the dropped crown may only appear next frame
+        Plugin.Log.LogInfo($"[AP] Flinging crown from x={px:F0} to x={target:F0} (half screen {view:F1})");
+        return nearest < float.MaxValue ? "Your crown went flying towards the Greed!" : "Your crown went flying!";
+    }
+
+    // Half the visible width, in world units at the monarch's depth.
+    private static float HalfViewWidth(Player player)
+    {
+        try
+        {
+            var cam = Camera.main;
+            if (cam != null)
+            {
+                var pos = player.transform.position;
+                float depth = Mathf.Abs(pos.z - cam.transform.position.z);
+                float left = cam.ViewportToWorldPoint(new Vector3(0f, 0.5f, depth)).x;
+                float right = cam.ViewportToWorldPoint(new Vector3(1f, 0.5f, depth)).x;
+                float half = Mathf.Abs(right - left) / 2f;
+                if (half > 1f && half < 200f) return half;
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogDebug($"[AP] View width: {e.Message}"); }
+        return 15f;
+    }
+
+    // Keeps a position on the island's ground, a little in from either end.
+    private static float ClampToLevel(float x)
+    {
+        try
+        {
+            foreach (var level in Object.FindObjectsByType<Level>(FindObjectsSortMode.None))
+            {
+                var ground = level == null ? null : level.GroundCollider;
+                if (ground == null) continue;
+                var bounds = ground.bounds;
+                return Mathf.Clamp(x, bounds.min.x + 8f, bounds.max.x - 8f);
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogDebug($"[AP] Level bounds: {e.Message}"); }
+        return x;
+    }
+
+    // Called every frame: finishes moving a flung crown once the game has spawned it.
+    public static void Tick()
+    {
+        if (Deserters.Count > 0) TickDeserters();
+        if (_crownFlingUntil <= 0f) return;
+        if (Time.unscaledTime > _crownFlingUntil)
+        {
+            _crownFlingUntil = 0f;
+            return;
+        }
+        try
+        {
+            var crown = GameAccess.Kingdom?.droppedP1Crown;
+            if (crown == null) return;
+            var pos = crown.transform.position;
+            crown.transform.position = new Vector3(_crownFlingX, pos.y + 1f, pos.z);
+            var body = crown.GetComponent<Rigidbody2D>();
+            if (body != null) body.position = new Vector2(_crownFlingX, pos.y + 1f);
+            Plugin.Log.LogInfo($"[AP] Crown flung to x={_crownFlingX:F0}");
+            _crownFlingUntil = 0f;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"[AP] Crown fling failed: {e.Message}");
+            _crownFlingUntil = 0f;
+        }
     }
 }

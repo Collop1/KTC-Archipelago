@@ -88,6 +88,8 @@ internal static class GameData
         ["Loki"] = ItemOfPower.ItemType.LokiItem,
     };
 
+    public const string GemPouch = "Gem Pouch";
+    public const int GemsPerPouch = 3;
     public const string CoinPouch = "Coin Pouch";
     public const string CoinSack = "Coin Sack";
     public const string Gem = "Gem";
@@ -95,7 +97,8 @@ internal static class GameData
 
     public static readonly string[] JunkItems =
     {
-        "Sunken Gold", "Broken Crown", "Tuft of Grass", "Greed Mask Shard", "Soggy Bread", "Bent Arrow", "Lost Banner",
+        "Sunken Gold (Junk)", "Broken Crown (Junk)", "Tuft of Grass (Junk)", "Greed Mask Shard (Junk)",
+        "Soggy Bread (Junk)", "Bent Arrow (Junk)", "Lost Banner (Junk)",
     };
 
     public const string TripTrap = "Trip Trap";
@@ -104,10 +107,14 @@ internal static class GameData
     public const string WavesGoneByTrap = "Waves Gone By Trap";
     public const string DamnedNightTrap = "Damned Night Trap";
     public const string DecayTrap = "Decay Trap";
+    public const string StamDamTrap = "Stam Dam Trap";
+    public const string DesertionTrap = "Desertion Trap";
+    public const string ToolTheftTrap = "Tool Theft Trap";
 
     public static readonly string[] Traps =
     {
-        TripTrap, SlipperyPouchTrap, WaveBackTrap, WavesGoneByTrap, DamnedNightTrap, DecayTrap,
+        TripTrap, SlipperyPouchTrap, WaveBackTrap, WavesGoneByTrap, DamnedNightTrap, DecayTrap, StamDamTrap,
+        DesertionTrap, ToolTheftTrap,
     };
 
     public enum ItemKind { Unlock, Filler, Junk, Trap }
@@ -133,7 +140,7 @@ internal static class GameData
         groups.Add(new() { Title = "Mounts", Kind = ItemKind.Unlock, Names = campaign.Mounts });
         if (campaign.Powers.Length > 0)
             groups.Add(new() { Title = "Powers", Kind = ItemKind.Unlock, Names = campaign.Powers });
-        groups.Add(new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { CoinPouch, CoinSack, Gem, Vagrants } });
+        groups.Add(new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { GemPouch, CoinPouch, CoinSack, Gem, Vagrants } });
         groups.Add(new() { Title = "Junk", Kind = ItemKind.Junk, Names = JunkItems });
         groups.Add(new() { Title = "Traps", Kind = ItemKind.Trap, Names = Traps });
         return groups.ToArray();
@@ -141,7 +148,8 @@ internal static class GameData
 
     public static ItemKind KindOf(string itemName)
     {
-        if (itemName is CoinPouch or CoinSack or Gem or Vagrants) return ItemKind.Filler;
+        // Gem Pouches are progression in the apworld, but in the game they're spent like any filler.
+        if (itemName is GemPouch or CoinPouch or CoinSack or Gem or Vagrants) return ItemKind.Filler;
         if (System.Array.IndexOf(Traps, itemName) >= 0) return ItemKind.Trap;
         if (System.Array.IndexOf(JunkItems, itemName) >= 0) return ItemKind.Junk;
         return ItemKind.Unlock;
@@ -187,6 +195,7 @@ internal static class GameData
         public Content Totals; // campaign-wide content (Olympus)
         public string[] Statues, Hermits, Mounts, Powers = System.Array.Empty<string>();
         public int DogIsland = 2;
+        public int QuarryIsland, MineIsland; // 0 = anywhere (Olympus)
 
         public bool CampaignWide => Totals != null;
         public int IslandCount => Islands.Count;
@@ -208,19 +217,19 @@ internal static class GameData
     {
         new()
         {
-            Key = "two_crowns", Display = "Two Crowns", BiomeIndex = 0, Islands = BaseIslands(),
+            Key = "two_crowns", Display = "Two Crowns", BiomeIndex = 0, Islands = BaseIslands(), QuarryIsland = 2, MineIsland = 4,
             Statues = StatuesBase, Hermits = HermitsBase,
             Mounts = new[] { "Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount", "Unicorn Mount" },
         },
         new()
         {
-            Key = "shogun", Display = "Shogun", BiomeIndex = 1, Islands = BaseIslands(),
+            Key = "shogun", Display = "Shogun", BiomeIndex = 1, Islands = BaseIslands(), QuarryIsland = 2, MineIsland = 4,
             Statues = StatuesBase, Hermits = HermitsBase,
             Mounts = new[] { "Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount", "Kirin Mount" },
         },
         new()
         {
-            Key = "dead_lands", Display = "Dead Lands", BiomeIndex = 2,
+            Key = "dead_lands", Display = "Dead Lands", BiomeIndex = 2, QuarryIsland = 2, MineIsland = 4,
             Islands = new Dictionary<int, Content>
             {
                 [1] = new Content(coin: 3, gem: 0, portals: 0, statues: 1, shrines: 1, hermits: 1),
@@ -234,7 +243,7 @@ internal static class GameData
         },
         new()
         {
-            Key = "norselands", Display = "Norselands", BiomeIndex = 3,
+            Key = "norselands", Display = "Norselands", BiomeIndex = 3, QuarryIsland = 2, MineIsland = 5,
             Islands = new Dictionary<int, Content>
             {
                 [1] = new Content(coin: 3, gem: 0, portals: 0, statues: 1, shrines: 1, hermits: 1, puzzle: "Heimdall"),
@@ -301,6 +310,22 @@ internal static class GameData
     public static string PuzzleLocation(int island, string god) => $"Island {island}: {god}'s Puzzle";
     public static string DogLocation(Campaign campaign) => campaign.CampaignWide ? "Free the Dog" : "Island 2: Free the Dog";
     public const string FullUpgradeLocation = "Fully Upgrade an Island";
+    public static string QuarryLocation(Campaign campaign) => campaign.CampaignWide ? "Build the Quarry" : $"Island {campaign.QuarryIsland}: Build the Quarry";
+    public static string MineLocation(Campaign campaign) => campaign.CampaignWide ? "Build the Mine" : $"Island {campaign.MineIsland}: Build the Mine";
+    public const string GrassLocation = "Eat Grass 100 Times";
+    public const int GrassTarget = 100;
+    public const string SunkCoinsLocation = "Sink 25 Coins";
+    public const int SunkCoinsTarget = 25;
+
+    public static readonly Dictionary<Hermit.HermitType, string> HermitBuildingLocations = new()
+    {
+        [Hermit.HermitType.Ballista] = "Hermit Building: Ballista",
+        [Hermit.HermitType.Baker] = "Hermit Building: Bakery",
+        [Hermit.HermitType.Horse] = "Hermit Building: Stable",
+        [Hermit.HermitType.Knight] = "Hermit Building: Warrior",
+        [Hermit.HermitType.Horn] = "Hermit Building: Horn",
+        [Hermit.HermitType.Fire] = "Hermit Building: Fire",
+    };
     public static string CastleLevelLocation(int level) => $"Castle Level {level}";
 
     // Call of Olympus: level config name -> island name used in "Reach ..." checks.
@@ -336,7 +361,14 @@ internal static class GameData
 
     public const string OlympusGoalLocation = "Defeat the World Serpent";
 
-    public enum Milestone { Greed, Greedlings, Floaters, Breeders, CrownStealers, Nights, Trees }
+    public enum Milestone
+    {
+        Greed, Greedlings, Floaters, Breeders, CrownStealers, Nights, Trees,
+        Walls, Towers, Farms, CitizenHouses,
+        Villagers, Archers, Builders, Farmers, Knights,
+        Animals, Deer, Rabbits, Boars,
+        Bribes, CoinsSpent,
+    }
 
     // slot_data "milestones" key, location template, label for the menu
     public static readonly Dictionary<Milestone, (string SlotKey, string Template, string Label)> Milestones = new()
@@ -348,6 +380,22 @@ internal static class GameData
         [Milestone.CrownStealers] = ("crown_stealers", "Slay {0} Crown Stealers", "Crown Stealers slain"),
         [Milestone.Nights] = ("nights", "Survive {0} Nights", "Nights survived"),
         [Milestone.Trees] = ("trees", "Fell {0} Trees", "Trees felled"),
+        // Building sanity: one check per building, so the "threshold" is the building's number.
+        [Milestone.Walls] = ("walls", "Build Wall {0}", "Walls built"),
+        [Milestone.Towers] = ("towers", "Build Archer Tower {0}", "Archer towers built"),
+        [Milestone.Farms] = ("farms", "Build Farm {0}", "Farms built"),
+        [Milestone.CitizenHouses] = ("citizen_houses", "Build Citizen House {0}", "Citizen houses built"),
+        [Milestone.Villagers] = ("villagers", "Recruit {0} Villagers", "Villagers recruited"),
+        [Milestone.Archers] = ("archers", "Recruit {0} Archers", "Archers recruited"),
+        [Milestone.Builders] = ("builders", "Recruit {0} Builders", "Builders recruited"),
+        [Milestone.Farmers] = ("farmers", "Recruit {0} Farmers", "Farmers recruited"),
+        [Milestone.Knights] = ("knights", "Recruit {0} Knights", "Knights recruited"),
+        [Milestone.Animals] = ("animals", "Hunt {0} Animals", "Animals hunted"),
+        [Milestone.Deer] = ("deer", "Hunt {0} Deer", "Deer hunted"),
+        [Milestone.Rabbits] = ("rabbits", "Hunt {0} Rabbits", "Rabbits hunted"),
+        [Milestone.Boars] = ("boars", "Hunt {0} Boars", "Boars hunted"),
+        [Milestone.Bribes] = ("bribes", "Bribe the Greed with {0} Coins", "Coins the Greed took"),
+        [Milestone.CoinsSpent] = ("coins_spent", "Spend {0} Coins", "Coins spent"),
     };
 
     public static string MilestoneLocation(Milestone milestone, int threshold) => string.Format(Milestones[milestone].Template, threshold);

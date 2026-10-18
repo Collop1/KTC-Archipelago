@@ -15,6 +15,7 @@ public class APRunner : MonoBehaviour
     {
         AP.Pump();
         Step(ItemHandler.Update);
+        Step(ItemEffects.Tick);
         Step(CheckTracker.Update);
         Step(Gating.Update);
 

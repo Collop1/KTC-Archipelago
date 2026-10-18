@@ -4,38 +4,45 @@ Kept deliberately on the strict side, since being too lenient would put a requir
 the player can't actually do yet:
   - Destroying portals needs Stone Technology and a castle upgraded at least four times (bombs).
   - Liberating an island (cliff portal) needs Stone + Iron Technology and five castle upgrades.
-  - Statues, mount shrines and hermit cabins cost gems, which only come from islands 2+ (Olympus has gems
-    from the start).
+  - Statues, mount shrines and hermit cabins cost gems. Chests give nothing in this randomizer, so gems
+    come from Gem Pouch items: a gem-cost check on island N expects enough pouches to pay for everything on
+    islands 1..N (Olympus: a growing share of the whole campaign's gem costs).
+  - The Stone Quarry needs a first castle upgrade; the Iron Mine needs Stone Technology and two upgrades.
+  - A hermit's building needs that hermit's item and the gems to have freed it.
   - Castle Level 5+ needs Stone Technology, Castle Level 7 needs Iron Technology.
-  - Later milestone checks (kills, nights) expect a sturdier kingdom and, for the rarer Greed, more islands.
+  - Later milestone checks expect a sturdier kingdom and more islands: milestone counts grow with each island
+    to liberate, so the k-th check of a kind expects as many islands open as it took to "earn" it. The rarer
+    Greed also expect a minimum number of islands.
   - Call of Olympus: the god quests expect a couple of castle upgrades, Mount Olympus expects all four god
     quests done, and defeating the serpent expects a strong castle, both techs and all four god powers.
 """
-from math import floor
+from math import ceil, floor
 
 from worlds.generic.Rules import set_rule
 
 from .campaigns import OLYMPUS_GOD_QUESTS, OLYMPUS_ISLANDS
+from .items import GEMS_PER_POUCH
 from .locations import (
-    CASTLE_LEVELS, FULL_UPGRADE_LOCATION, GEM_KINDS, MILESTONES, OLYMPUS_GOAL_LOCATION, PROGRESSIVE_KINDS,
-    campaign_progressive_name, castle_level_name, island_progressive_name, liberate_name, milestone_name,
-    milestone_thresholds, olympus_god_quest_name, olympus_reach_name,
+    CASTLE_LEVELS, FULL_UPGRADE_LOCATION, GEM_KINDS, HERMIT_BUILDINGS, MILESTONE_REQUIREMENTS, MILESTONES,
+    OLYMPUS_GOAL_LOCATION, hermits_in_play,
+    PROGRESSIVE_KINDS, campaign_progressive_name, castle_level_name, island_progressive_name, liberate_name,
+    milestone_name, milestone_per_island, milestone_thresholds, mine_name, olympus_god_quest_name, olympus_reach_name,
+    quarry_name,
 )
 
 CASTLE = "Progressive Castle"
 STONE = "Stone Technology"
 IRON = "Iron Technology"
 
-# category -> (extra castle upgrades on top of the tier, minimum islands reachable)
-MILESTONE_REQUIREMENTS: dict[str, tuple[int, int]] = {
-    "greed": (0, 1),
-    "greedlings": (0, 1),
-    "floaters": (1, 2),
-    "breeders": (2, 3),
-    "crown_stealers": (1, 2),
-    "nights": (0, 1),
-    "trees": (-99, 1),
-}
+
+def gems(state, player: int) -> int:
+    return GEMS_PER_POUCH * state.count("Gem Pouch", player)
+
+
+def olympus_gem_need(campaign, kind: str, k: int) -> int:
+    """The k-th Olympus statue/shrine/cabin expects a matching share of every gem cost in the campaign."""
+    count = getattr(campaign.totals, kind)
+    return -(-campaign.total_gem_cost * k // count)
 
 
 def can_destroy_portals(state, player: int) -> bool:
@@ -56,27 +63,41 @@ def set_all_rules(world) -> None:
 
     if campaign.is_campaign_wide:
         _set_olympus_rules(world, location)
+        max_islands = 5
         islands_reachable = lambda state: 5  # noqa: E731 - Olympus opens its islands through quests
     else:
-        islands = list(campaign.islands)
+        islands = list(world.islands_in_play)
+        max_islands = len(islands)
 
         def islands_reachable(state) -> int:
             return sum(state.can_reach_region(f"Island {i}", player) for i in islands)
 
-        def has_gem_source(state) -> bool:
-            return any(state.can_reach_region(f"Island {i}", player) for i in islands if i > 1)
-
-        for island, content in campaign.islands.items():
+        for island in islands:
+            content = campaign.islands[island]
+            gem_need = campaign.cumulative_gem_cost(island)
             for kind in PROGRESSIVE_KINDS:
                 for k in range(1, getattr(content, kind) + 1):
                     name = island_progressive_name(island, kind, k)
                     if kind == "portals":
                         set_rule(location(name), lambda state: can_destroy_portals(state, player))
                     elif kind in GEM_KINDS:
-                        set_rule(location(name), has_gem_source)
+                        set_rule(location(name), lambda state, n=gem_need: gems(state, player) >= n)
             set_rule(location(liberate_name(island)), lambda state: can_liberate(state, player))
 
-        goal = min(world.options.islands_to_liberate.value, campaign.island_count)
+        if campaign.quarry_island in islands:
+            set_rule(location(quarry_name(campaign.quarry_island)), lambda state: state.has(CASTLE, player, 1))
+        if campaign.mine_island in islands:
+            set_rule(location(mine_name(campaign.mine_island)),
+                     lambda state: state.has(STONE, player) and state.has(CASTLE, player, 2))
+        if world.options.hermit_building_checks:
+            for hermit in hermits_in_play(world):
+                island = campaign.hermit_islands[hermit]
+                set_rule(location(HERMIT_BUILDINGS[hermit]),
+                         lambda state, h=hermit, i=island, n=campaign.cumulative_gem_cost(island):
+                         state.has(h, player) and state.can_reach_region(f"Island {i}", player)
+                         and gems(state, player) >= n)
+
+        goal = min(world.options.islands_to_liberate.value, len(islands))
         liberations = [liberate_name(island) for island in islands]
         multiworld.completion_condition[player] = lambda state: sum(
             state.can_reach_location(name, player) for name in liberations
@@ -94,12 +115,16 @@ def set_all_rules(world) -> None:
 
     for category in MILESTONES:
         thresholds = milestone_thresholds(world, category)
+        if not thresholds:
+            continue
+        per_island = milestone_per_island(world, category)
         extra_castle, min_islands = MILESTONE_REQUIREMENTS[category]
         for i, threshold in enumerate(thresholds, start=1):
             tier = floor(3 * (i - 1) / len(thresholds))
             castle_needed = max(0, tier + extra_castle)
+            islands_needed = min(max(min_islands, ceil(i / per_island)), max_islands)
             set_rule(location(milestone_name(category, threshold)),
-                     lambda state, c=castle_needed, m=min_islands: state.has(CASTLE, player, c)
+                     lambda state, c=castle_needed, m=islands_needed: state.has(CASTLE, player, c)
                      and (m <= 1 or islands_reachable(state) >= m))
 
 
@@ -109,6 +134,18 @@ def _set_olympus_rules(world, location) -> None:
 
     for k in range(1, campaign.totals.portals + 1):
         set_rule(location(campaign_progressive_name("portals", k)), lambda state: can_destroy_portals(state, player))
+    for kind in GEM_KINDS:
+        for k in range(1, getattr(campaign.totals, kind) + 1):
+            set_rule(location(campaign_progressive_name(kind, k)),
+                     lambda state, n=olympus_gem_need(campaign, kind, k): gems(state, player) >= n)
+    set_rule(location(quarry_name(0)), lambda state: state.has(CASTLE, player, 1))
+    set_rule(location(mine_name(0)), lambda state: state.has(STONE, player) and state.has(CASTLE, player, 2))
+    if world.options.hermit_building_checks:
+        # Any hermit could be in any cabin, so its building expects every cabin to be affordable.
+        all_cabins = olympus_gem_need(campaign, "hermit_cabins", campaign.totals.hermit_cabins)
+        for hermit in campaign.hermits:
+            set_rule(location(HERMIT_BUILDINGS[hermit]),
+                     lambda state, h=hermit: state.has(h, player) and gems(state, player) >= all_cabins)
 
     for island in OLYMPUS_ISLANDS:
         if island.endswith("Quest Island"):

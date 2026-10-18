@@ -24,6 +24,9 @@ internal sealed class ModState
 
     public List<string> PendingLocations { get; set; } = new();
 
+    // Gems the Greed stole on a DeathLink, waiting to be won back (see StolenGems).
+    public List<StolenGemsEntry> StolenGems { get; set; } = new();
+
     [JsonIgnore] public bool Dirty;
 
     [JsonIgnore] public bool IsOffline => Seed.Length == 0;
@@ -57,4 +60,11 @@ internal sealed class ModState
         if (IsOffline) return; // debug-only progress before ever connecting isn't worth keeping
         Storage.Save(PathFor(Seed, Slot), this);
     }
+}
+
+internal sealed class StolenGemsEntry
+{
+    public int Island { get; set; }
+    public int Gems { get; set; }
+    public int NightsLeft { get; set; }
 }

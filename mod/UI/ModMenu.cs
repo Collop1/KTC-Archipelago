@@ -4,6 +4,7 @@ using System.Linq;
 using Archipelago.MultiClient.Net.Enums;
 using APHint = Archipelago.MultiClient.Net.Models.Hint;
 using Coatsink.Common;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -25,7 +26,6 @@ public class ModMenu : MonoBehaviour
         KeyCode.F10, KeyCode.F11, KeyCode.Insert, KeyCode.Home, KeyCode.BackQuote,
     };
 
-    private const int WindowId = 734022;
     private const float HeaderHeight = 54f;
     private const float SidebarWidth = 126f;
 
@@ -38,7 +38,6 @@ public class ModMenu : MonoBehaviour
     private bool _chatOnlyMine;
     private Rect _rect;
     private bool _resizing;
-    private GUI.WindowFunction _windowFunc;
     private bool _showPassword;
     private string _toast = "";
     private float _toastUntil;
@@ -94,11 +93,65 @@ public class ModMenu : MonoBehaviour
             ClientSettings.Current.WindowScale = _pendingScale;
             ClientSettings.Save();
         }
+
+        UpdateWindowDrag();
+        _drawThisFrame = _visible && NeedsDraw();
+    }
+
+    // --- Drawing on demand ---
+    // Drawing the menu every frame through IMGUI made a steady stream of game-side garbage, and this game runs
+    // without incremental GC, so the collections froze it several times a second. Instead the menu is drawn into a
+    // picture (see UiBlocker) whenever something could have changed: while the mouse moves or a button is held, on
+    // any key or scroll, while typing, and otherwise a few times a second to keep counters fresh.
+    private const float IdleRedrawSeconds = 0.25f;
+    private bool _drawThisFrame;
+    private bool _forceDraw;
+    private float _nextDraw;
+    private Vector3 _lastMouse;
+
+    private bool NeedsDraw()
+    {
+        if (!UiBlocker.CanCapture) return true; // no picture to fall back on: draw every frame like any IMGUI menu
+        var mouse = Input.mousePosition;
+        bool moved = (mouse - _lastMouse).sqrMagnitude > 0.25f;
+        _lastMouse = mouse;
+        bool draw = _forceDraw || moved
+            || Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1)
+            || Input.mouseScrollDelta.sqrMagnitude > 0f || Input.anyKeyDown || TextInput.AnyFocused
+            || _resizing || _draggingWindow || _draggingScale || Time.unscaledTime >= _nextDraw;
+        _forceDraw = false;
+        return draw;
+    }
+
+    // --- Moving the window by its header ---
+    private bool _draggingWindow;
+    private Vector2 _dragStartMouse, _dragStartPos;
+
+    private void BeginWindowDrag()
+    {
+        _draggingWindow = true;
+        _dragStartMouse = Input.mousePosition;
+        _dragStartPos = new Vector2(_rect.x, _rect.y);
+    }
+
+    private void UpdateWindowDrag()
+    {
+        if (!_draggingWindow) return;
+        float scale = Mathf.Clamp(ClientSettings.Current.WindowScale, 0.5f, 2.5f);
+        Vector2 mouse = Input.mousePosition;
+        _rect.x = _dragStartPos.x + (mouse.x - _dragStartMouse.x) / scale;
+        _rect.y = _dragStartPos.y - (mouse.y - _dragStartMouse.y) / scale; // screen y grows upwards, GUI y downwards
+        if (!Input.GetMouseButton(0))
+        {
+            _draggingWindow = false;
+            SaveWindow();
+        }
     }
 
     private void SetVisible(bool visible)
     {
         _visible = visible;
+        _forceDraw = true;
         if (!visible)
         {
             TextInput.ClearFocus();
@@ -120,70 +173,88 @@ public class ModMenu : MonoBehaviour
     private void OnGUI()
     {
         Styles.Build();
+        var type = Event.current.type;
 
-        if (_visible && Event.current.type == EventType.MouseDown) TextInput.ClearFocus(); // clicking a box re-focuses it
+        if (_visible && type == EventType.MouseDown) TextInput.ClearFocus(); // clicking a box re-focuses it
 
         Feed.Draw();
-        if (!_visible) return;
+        if (!_visible || !_drawThisFrame) return; // between redraws the last picture stays on screen
 
         var s = ClientSettings.Current;
         float scale = Mathf.Clamp(s.WindowScale, 0.5f, 2.5f);
-        var oldMatrix = GUI.matrix;
-        var oldBg = GUI.backgroundColor;
-        GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
-
         float maxW = Screen.width / scale, maxH = Screen.height / scale;
         _rect.width = Mathf.Clamp(_rect.width, 520f, Mathf.Max(520f, maxW));
         _rect.height = Mathf.Clamp(_rect.height, 380f, Mathf.Max(380f, maxH));
         _rect.x = Mathf.Clamp(_rect.x, 0f, Mathf.Max(0f, maxW - 80f));
         _rect.y = Mathf.Clamp(_rect.y, 0f, Mathf.Max(0f, maxH - 60f));
-
         _opacity = Mathf.Clamp(s.MenuOpacity, 0.3f, 1f);
-        GUI.backgroundColor = new Color(1f, 1f, 1f, _opacity);
-        _windowFunc ??= (Action<int>)DrawWindow;
-        _rect = GUI.Window(WindowId, _rect, _windowFunc, GUIContent.none, Styles.Window);
 
-        GUI.backgroundColor = oldBg;
-        GUI.matrix = oldMatrix;
-
-        // Keep the game's own UI (e.g. the pause menu) from taking clicks meant for this window.
-        if (Event.current.type == EventType.Repaint)
-            UiBlocker.Cover(new Rect(_rect.x * scale, _rect.y * scale, _rect.width * scale, _rect.height * scale));
-    }
-
-    private void DrawWindow(int id)
-    {
-        GUI.backgroundColor = new Color(1f, 1f, 1f, _opacity);
+        bool repaint = type == EventType.Repaint;
+        RenderTexture previous = null;
+        bool captured = repaint && UiBlocker.BeginCapture(out previous);
+        var oldMatrix = GUI.matrix;
+        var oldBg = GUI.backgroundColor;
         try
         {
-            GUILayout.BeginVertical();
+            GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+            GUI.backgroundColor = new Color(1f, 1f, 1f, _opacity);
+            DrawWindow();
+        }
+        finally
+        {
+            GUI.backgroundColor = oldBg;
+            GUI.matrix = oldMatrix;
+            if (captured) UiBlocker.EndCapture(previous);
+        }
 
-            GUILayout.BeginVertical(Styles.Header, GUILayout.Height(HeaderHeight));
-            GUILayout.Label("Archipelago: Kingdom Two Crowns", Styles.Title);
-            GUILayout.Label($"v{MyPluginInfo.PLUGIN_VERSION}   |   {StatusLine()}", Styles.Subtitle);
+        if (repaint)
+        {
+            _nextDraw = Time.unscaledTime + IdleRedrawSeconds;
+            // Keep the game's own UI (e.g. the pause menu) from taking clicks meant for this window.
+            UiBlocker.Cover(new Rect(_rect.x * scale, _rect.y * scale, _rect.width * scale, _rect.height * scale));
+        }
+    }
+
+    private void DrawWindow()
+    {
+        GUILayout.BeginArea(_rect, Styles.Window);
+        try
+        {
+            var e = Event.current;
+            if (e.type == EventType.MouseDown && e.button == 0 && new Rect(0f, 0f, _rect.width, HeaderHeight).Contains(e.mousePosition))
+            {
+                BeginWindowDrag();
+                e.Use();
+            }
+
+            Gui.BeginVertical();
+
+            Gui.BeginVertical(Styles.Header, Gui.Height(HeaderHeight));
+            Gui.Label("Archipelago: Kingdom Two Crowns", Styles.Title);
+            Gui.Label($"v{MyPluginInfo.PLUGIN_VERSION}   |   {StatusLine()}", Styles.Subtitle);
             GUILayout.EndVertical();
 
-            GUILayout.BeginHorizontal();
+            Gui.BeginHorizontal();
             DrawSidebar();
-            GUILayout.BeginVertical();
+            Gui.BeginVertical();
             if (_tab == Tab.Chat)
             {
                 DrawChatTab();
             }
             else
             {
-                _scroll[(int)_tab] = GUILayout.BeginScrollView(_scroll[(int)_tab]);
+                _scroll[(int)_tab] = GUILayout.BeginScrollView(_scroll[(int)_tab], Gui.None);
                 DrawTab();
                 GUILayout.EndScrollView();
             }
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(Time.unscaledTime < _toastUntil ? _toast : "", Styles.Small);
+            Gui.BeginHorizontal();
+            Gui.Label(Time.unscaledTime < _toastUntil ? _toast : "", Styles.Small);
             GUILayout.FlexibleSpace();
-            var grip = GUILayoutUtility.GetRect(18f, 18f);
-            GUI.Label(grip, "<color=#998C73>//</color>", Styles.Small);
+            var grip = GUILayoutUtility.GetRect(18f, 18f, Gui.None);
+            GUI.Label(grip, Gui.Content("<color=#998C73>//</color>"), Styles.Small);
             HandleResize(grip);
             GUILayout.EndHorizontal();
 
@@ -193,7 +264,7 @@ public class ModMenu : MonoBehaviour
         {
             Plugin.Log.LogError($"[AP] Menu: {e}");
         }
-        GUI.DragWindow(new Rect(0f, 0f, _rect.width, HeaderHeight));
+        GUILayout.EndArea();
     }
 
     private static string StatusLine()
@@ -205,18 +276,18 @@ public class ModMenu : MonoBehaviour
 
     private void DrawSidebar()
     {
-        GUILayout.BeginVertical(Styles.Header, GUILayout.Width(SidebarWidth));
+        Gui.BeginVertical(Styles.Header, Gui.Width(SidebarWidth));
         GUILayout.Space(6f);
         for (int i = 0; i < TabLabels.Length; i++)
         {
-            if (GUILayout.Button(TabLabels[i], _tab == (Tab)i ? Styles.TabActive : Styles.Tab, GUILayout.Height(30f)))
+            if (Gui.Button(TabLabels[i], _tab == (Tab)i ? Styles.TabActive : Styles.Tab, Gui.Height(30f)))
             {
                 _tab = (Tab)i;
                 TextInput.ClearFocus();
             }
         }
         GUILayout.FlexibleSpace();
-        GUILayout.Label($"{(KeyCode)ClientSettings.Current.MenuKey} to close", Styles.Credit);
+        Gui.Label($"{(KeyCode)ClientSettings.Current.MenuKey} to close", Styles.Credit);
         GUILayout.Space(4f);
         GUILayout.EndVertical();
     }
@@ -266,19 +337,105 @@ public class ModMenu : MonoBehaviour
 
     // ---------------------------------------------------------------- widgets
 
+    // Long lists are shown a page at a time: drawing hundreds of rows every frame is what makes IMGUI slow.
+    private const int PageSize = 25;
+    private const int ChatLines = 150;
+    private readonly Dictionary<string, int> _pages = new();
+
+    // Draws "< Prev  Page 2 / 7  Next >" when a list needs more than one page; returns the first index to show.
+    private int Pager(string key, int count)
+    {
+        int pages = Math.Max(1, (count + PageSize - 1) / PageSize);
+        int page = Math.Min(_pages.TryGetValue(key, out var p) ? p : 0, pages - 1);
+        if (pages > 1)
+        {
+            Gui.BeginHorizontal();
+            if (Gui.Button("< Prev", Styles.ButtonSmall, Gui.Width(70f)) && page > 0) page--;
+            Gui.Label($"  Page {page + 1} / {pages}", Styles.Small, Gui.Width(110f));
+            if (Gui.Button("Next >", Styles.ButtonSmall, Gui.Width(70f)) && page < pages - 1) page++;
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+        }
+        _pages[key] = page;
+        return page * PageSize;
+    }
+
+    // Up to four equal buttons side by side; one line of text each, so nothing gets cut off.
+    private void ButtonRow((string Label, Action OnClick)[] buttons)
+    {
+        // Same width in every row so the columns line up (the card's inner width, split four ways).
+        float width = Mathf.Floor(Mathf.Max(60f, (_rect.width - SidebarWidth - 90f) / 4f));
+        Gui.BeginHorizontal();
+        foreach (var (label, onClick) in buttons)
+            if (Gui.Button(label, Styles.ButtonSmall, Gui.Size(width, 24f))) onClick();
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+    }
+
+    private static readonly (string, Action)[][] SimulateRows =
+    {
+        new (string, Action)[]
+        {
+            ("+1 Night", () => CheckTracker.AddMilestone(GameData.Milestone.Nights)),
+            ("Die (nights to 0)", CheckTracker.OnDeath),
+            ("+5 Trees", () => CheckTracker.AddMilestone(GameData.Milestone.Trees, 5)),
+            ("DeathLink", ItemHandler.DebugDeathLink),
+        },
+        new (string, Action)[]
+        {
+            ("+5 Greedlings", () => { for (int i = 0; i < 5; i++) CheckTracker.OnEnemyKilled(EnemyType.TrollWeak); }),
+            ("+1 Floater", () => CheckTracker.OnEnemyKilled(EnemyType.Squid)),
+            ("+1 Breeder", () => CheckTracker.OnEnemyKilled(EnemyType.Boss)),
+            ("+1 Crown Stealer", () => CheckTracker.OnEnemyKilled(EnemyType.Stealer)),
+        },
+        new (string, Action)[]
+        {
+            ("+1 Wall", () => CheckTracker.AddMilestone(GameData.Milestone.Walls)),
+            ("+1 Tower", () => CheckTracker.AddMilestone(GameData.Milestone.Towers)),
+            ("+1 Farm", () => CheckTracker.AddMilestone(GameData.Milestone.Farms)),
+            ("+1 Citizen House", () => CheckTracker.AddMilestone(GameData.Milestone.CitizenHouses)),
+        },
+        new (string, Action)[]
+        {
+            ("+5 Villagers", () => CheckTracker.AddMilestone(GameData.Milestone.Villagers, 5)),
+            ("+1 Archer", () => CheckTracker.AddMilestone(GameData.Milestone.Archers)),
+            ("+1 Builder", () => CheckTracker.AddMilestone(GameData.Milestone.Builders)),
+            ("+1 Farmer", () => CheckTracker.AddMilestone(GameData.Milestone.Farmers)),
+        },
+        new (string, Action)[]
+        {
+            ("+1 Knight", () => CheckTracker.AddMilestone(GameData.Milestone.Knights)),
+            ("+1 Deer", () => CheckTracker.OnAnimalKilled(GameData.Milestone.Deer)),
+            ("+1 Rabbit", () => CheckTracker.OnAnimalKilled(GameData.Milestone.Rabbits)),
+            ("+1 Boar", () => CheckTracker.OnAnimalKilled(GameData.Milestone.Boars)),
+        },
+        new (string, Action)[]
+        {
+            ("+5 Greed bribes", () => CheckTracker.AddMilestone(GameData.Milestone.Bribes, 5)),
+            ("+25 Coins spent", () => CheckTracker.AddMilestone(GameData.Milestone.CoinsSpent, 25)),
+            ("+10 Grass", () => { for (int i = 0; i < 10; i++) CheckTracker.OnGrassEaten(); }),
+            ("+5 Sunk coins", () => { for (int i = 0; i < 5; i++) CheckTracker.OnCoinSunk(); }),
+        },
+        new (string, Action)[]
+        {
+            ("Quarry built", () => CheckTracker.OnTechBuilding(TechnologyAge.Stone)),
+            ("Mine built", () => CheckTracker.OnTechBuilding(TechnologyAge.Iron)),
+        },
+    };
+
     private static void BeginCard(string title)
     {
-        GUILayout.BeginVertical(Styles.Card);
-        GUILayout.Label(title, Styles.Section);
+        Gui.BeginVertical(Styles.Card);
+        Gui.Label(title, Styles.Section);
     }
 
     private static void EndCard() => GUILayout.EndVertical();
 
     private static void Row(string label, string value)
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Styles.Body, GUILayout.Width(190f));
-        GUILayout.Label(value, Styles.Body);
+        Gui.BeginHorizontal();
+        Gui.Label(label, Styles.Body, Gui.Width(190f));
+        Gui.Label(value, Styles.Body);
         GUILayout.EndHorizontal();
     }
 
@@ -287,15 +444,15 @@ public class ModMenu : MonoBehaviour
         var old = GUI.backgroundColor;
         var tint = on ? Styles.On : Styles.Off;
         GUI.backgroundColor = new Color(tint.r, tint.g, tint.b, _opacity);
-        bool clicked = GUILayout.Button(on ? onText : offText, Styles.Pill, GUILayout.Width(64f));
+        bool clicked = Gui.Button(on ? onText : offText, Styles.Pill, Gui.Width(64f));
         GUI.backgroundColor = old;
         return clicked;
     }
 
     private static bool PillRow(string label, bool on)
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Styles.Body, GUILayout.Width(280f));
+        Gui.BeginHorizontal();
+        Gui.Label(label, Styles.Body, Gui.Width(280f));
         bool clicked = Pill(on);
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
@@ -304,19 +461,19 @@ public class ModMenu : MonoBehaviour
 
     private static float SliderRow(string label, float value, float min, float max, string format)
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Styles.Body, GUILayout.Width(170f));
-        GUILayout.Label(value.ToString(format), Styles.Body, GUILayout.Width(44f));
-        float v = GUILayout.HorizontalSlider(value, min, max, GUILayout.ExpandWidth(true));
+        Gui.BeginHorizontal();
+        Gui.Label(label, Styles.Body, Gui.Width(170f));
+        Gui.Label(value.ToString(format), Styles.Body, Gui.Width(44f));
+        float v = GUILayout.HorizontalSlider(value, min, max, Gui.ExpandWidth);
         GUILayout.EndHorizontal();
         return v;
     }
 
     // A button that needs a second click within a few seconds, for anything destructive.
-    private static bool ConfirmButton(string label, string key, GUIStyle style, params GUILayoutOption[] options)
+    private static bool ConfirmButton(string label, string key, GUIStyle style, Il2CppReferenceArray<GUILayoutOption> options)
     {
         bool armed = _armed.TryGetValue(key, out var until) && Time.unscaledTime < until;
-        if (!GUILayout.Button(armed ? $"<color={Styles.HexBad}>Confirm?</color>" : label, style, options)) return false;
+        if (!Gui.Button(armed ? $"<color={Styles.HexBad}>Confirm?</color>" : label, style, options)) return false;
         if (armed)
         {
             _armed.Remove(key);
@@ -359,34 +516,34 @@ public class ModMenu : MonoBehaviour
         var s = ClientSettings.Current;
 
         BeginCard("ARCHIPELAGO SERVER");
-        GUILayout.Label("Server address (host:port)", Styles.Dim);
-        _host.Draw(Styles.TextField, GUILayout.Height(28f));
-        GUILayout.Label("Slot name", Styles.Dim);
-        _slot.Draw(Styles.TextField, GUILayout.Height(28f));
-        GUILayout.Label("Password (leave empty if the room has none)", Styles.Dim);
-        GUILayout.BeginHorizontal();
+        Gui.Label("Server address (host:port)", Styles.Dim);
+        _host.Draw(Styles.TextField, Gui.Height(28f));
+        Gui.Label("Slot name", Styles.Dim);
+        _slot.Draw(Styles.TextField, Gui.Height(28f));
+        Gui.Label("Password (leave empty if the room has none)", Styles.Dim);
+        Gui.BeginHorizontal();
         _password.Masked = !_showPassword;
-        _password.Draw(Styles.TextField, GUILayout.Height(28f), GUILayout.ExpandWidth(true));
-        if (GUILayout.Button(_showPassword ? "Hide" : "Show", Styles.ButtonSmall, GUILayout.Width(60f), GUILayout.Height(28f)))
+        _password.Draw(Styles.TextField, Gui.HeightExpandWidth(28f));
+        if (Gui.Button(_showPassword ? "Hide" : "Show", Styles.ButtonSmall, Gui.Size(60f, 28f)))
             _showPassword = !_showPassword;
         GUILayout.EndHorizontal();
         GUILayout.Space(8f);
 
-        GUILayout.BeginHorizontal();
+        Gui.BeginHorizontal();
         if (AP.Connecting)
         {
-            GUILayout.Button("Connecting...", Styles.Button, GUILayout.Height(32f), GUILayout.Width(180f));
+            Gui.Button("Connecting...", Styles.Button, Gui.Size(180f, 32f));
         }
         else if (AP.Connected)
         {
-            if (GUILayout.Button("Disconnect", Styles.Button, GUILayout.Height(32f), GUILayout.Width(180f))) AP.Disconnect();
+            if (Gui.Button("Disconnect", Styles.Button, Gui.Size(180f, 32f))) AP.Disconnect();
         }
-        else if (GUILayout.Button($"<b>Connect</b>", Styles.Button, GUILayout.Height(32f), GUILayout.Width(180f)))
+        else if (Gui.Button($"<b>Connect</b>", Styles.Button, Gui.Size(180f, 32f)))
         {
             ConnectFromFields();
         }
         GUILayout.Space(10f);
-        GUILayout.Label(AP.StatusIsError ? $"<color={Styles.HexBad}>{AP.Escape(AP.Status)}</color>" : AP.Escape(AP.Status), Styles.Body);
+        Gui.Label(AP.StatusIsError ? $"<color={Styles.HexBad}>{AP.Escape(AP.Status)}</color>" : AP.Escape(AP.Status), Styles.Body);
         GUILayout.EndHorizontal();
         GUILayout.Space(4f);
 
@@ -417,8 +574,8 @@ public class ModMenu : MonoBehaviour
                 Row("Goal", $"Liberate {AP.Slot.GoalIslands} island(s), {CheckTracker.LiberatedIslands()} done");
             if (!campaign.CampaignWide)
                 Row("Island unlocks", AP.Slot.UsesIslandUnlocks ? "On (islands are items)" : "Off (islands open in order)");
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("DeathLink", Styles.Body, GUILayout.Width(190f));
+            Gui.BeginHorizontal();
+            Gui.Label("DeathLink", Styles.Body, Gui.Width(190f));
             if (Pill(AP.DeathLinkOn)) AP.SetDeathLink(!AP.DeathLinkOn);
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
@@ -431,7 +588,7 @@ public class ModMenu : MonoBehaviour
     {
         if (GameAccess.CampaignMatches) return;
         BeginCard("WRONG CAMPAIGN");
-        GUILayout.Label($"<color={Styles.HexBad}>This seed is for {AP.Slot.Campaign.Display}, but the game has a different campaign loaded.</color> " +
+        Gui.Label($"<color={Styles.HexBad}>This seed is for {AP.Slot.Campaign.Display}, but the game has a different campaign loaded.</color> " +
                         "Checks, items and locks are paused until you load or start a " + AP.Slot.Campaign.Display + " campaign.", Styles.Body);
         EndCard();
     }
@@ -447,32 +604,36 @@ public class ModMenu : MonoBehaviour
         var campaign = AP.Slot.Campaign;
         if (!campaign.CampaignWide)
         {
-            var islands = string.Join("   ", Enumerable.Range(1, campaign.IslandCount).Select(i => $"{Check(Gating.IsIslandUnlocked(i))} {i}"));
-            Row("Islands", AP.Slot.UsesIslandUnlocks ? islands : "All open (in order)");
+            var islands = string.Join("   ", Enumerable.Range(1, AP.Slot.IslandsInPlay).Select(i => $"{Check(Gating.IsIslandUnlocked(i))} {i}"));
+            string inSeed = AP.Slot.IslandsLimited ? $"   <color={Styles.HexDim}>(this seed uses islands 1-{AP.Slot.IslandsInPlay})</color>" : "";
+            Row("Islands", (AP.Slot.UsesIslandUnlocks ? islands : "Open in order") + inSeed);
         }
         foreach (var group in GameData.ItemGroupsFor(campaign).Where(g => g.Title is "Statues" or "Hermits" or "Mounts" or "Powers"))
         {
-            GUILayout.Label(group.Title, Styles.Dim);
+            Gui.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
             {
-                GUILayout.BeginHorizontal();
+                Gui.BeginHorizontal();
                 foreach (var name in group.Names.Skip(i).Take(3))
-                    GUILayout.Label($"{Check(ItemHandler.Has(name))} {name}", Styles.Small, GUILayout.Width(170f));
+                    Gui.Label($"{Check(ItemHandler.Has(name))} {name}", Styles.Small, Gui.Width(170f));
                 GUILayout.EndHorizontal();
             }
         }
+        if (AP.State.StolenGems.Count > 0)
+            Row("Stolen gems", $"<color={Styles.HexTrap}>{StolenGems.Describe()}</color>");
         if (ItemHandler.DebugGrants.Count > 0)
-            GUILayout.Label($"<color={Styles.HexTrap}>Includes {ItemHandler.DebugGrants.Values.Sum()} debug grant(s) from the Debug tab.</color>", Styles.Small);
+            Gui.Label($"<color={Styles.HexTrap}>Includes {ItemHandler.DebugGrants.Values.Sum()} debug grant(s) from the Debug tab.</color>", Styles.Small);
         EndCard();
 
         BeginCard($"RECEIVED ITEMS ({AP.Received.Count})");
-        if (AP.Received.Count == 0) GUILayout.Label("Nothing yet.", Styles.Dim);
-        for (int i = AP.Received.Count - 1; i >= 0; i--)
+        if (AP.Received.Count == 0) Gui.Label("Nothing yet.", Styles.Dim);
+        int firstItem = Pager("received", AP.Received.Count);
+        for (int j = firstItem; j < Math.Min(firstItem + PageSize, AP.Received.Count); j++)
         {
-            var item = AP.Received[i];
+            var item = AP.Received[AP.Received.Count - 1 - j]; // newest first
             var from = item.Sender == AP.SlotName ? "you" : AP.Escape(item.Sender);
             var where = string.IsNullOrEmpty(item.Location) ? "" : $" <color={Styles.HexDim}>({AP.Escape(item.Location)})</color>";
-            GUILayout.Label($"<color={ItemColor(item.Flags)}>{AP.Escape(item.Name)}</color>  from <color={Styles.HexPlayer}>{from}</color>{where}", Styles.Small);
+            Gui.Label($"<color={ItemColor(item.Flags)}>{AP.Escape(item.Name)}</color>  from <color={Styles.HexPlayer}>{from}</color>{where}", Styles.Small);
         }
         EndCard();
     }
@@ -515,6 +676,8 @@ public class ModMenu : MonoBehaviour
                 : $"<color={Styles.HexGood}>all {count} done</color>";
             Row(GameData.Milestones[milestone].Label, $"<b>{value}</b>   {nextText}");
         }
+        OneOffRow("Grass eaten", CheckTracker.GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
+        OneOffRow("Coins sunk", CheckTracker.SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
         EndCard();
 
         var campaign = AP.Slot.Campaign;
@@ -557,17 +720,26 @@ public class ModMenu : MonoBehaviour
 
         var missing = MissingLocations();
         BeginCard($"MISSING CHECKS ({missing.Count})");
-        if (!AP.Connected) GUILayout.Label("Connect to see which checks are left.", Styles.Dim);
-        else GUILayout.Label($"Hint points: {AP.HintPoints}. Hinting a location reveals what's there.", Styles.Dim);
-        foreach (var name in missing)
+        if (!AP.Connected) Gui.Label("Connect to see which checks are left.", Styles.Dim);
+        else Gui.Label($"Hint points: {AP.HintPoints}. Hinting a location reveals what's there.", Styles.Dim);
+        int firstMissing = Pager("missing", missing.Count);
+        for (int i = firstMissing; i < Math.Min(firstMissing + PageSize, missing.Count); i++)
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(AP.Escape(name), Styles.Small);
+            var name = missing[i];
+            Gui.BeginHorizontal();
+            Gui.Label(AP.Escape(name), Styles.Small);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Hint", Styles.ButtonSmall, GUILayout.Width(50f))) RequestHint(name, location: true);
+            if (Gui.Button("Hint", Styles.ButtonSmall, Gui.Width(50f))) RequestHint(name, location: true);
             GUILayout.EndHorizontal();
         }
         EndCard();
+    }
+
+    private static void OneOffRow(string label, string counter, int target, string location)
+    {
+        if (AP.Connected && !AP.IsLocationInSeed(location)) return;
+        int value = AP.State.Counter(counter);
+        Row(label, AP.IsChecked(location) ? $"<b>{value}</b>   <color={Styles.HexGood}>done</color>" : $"<b>{value}</b> / {target}");
     }
 
     // ---------------------------------------------------------------- HINTS
@@ -588,16 +760,16 @@ public class ModMenu : MonoBehaviour
     private void DrawHintsTab()
     {
         BeginCard("REQUEST A HINT");
-        if (!AP.Connected) GUILayout.Label("Connect to request hints.", Styles.Dim);
+        if (!AP.Connected) Gui.Label("Connect to request hints.", Styles.Dim);
         else
         {
             int cost = AP.HintCost;
-            GUILayout.Label($"Hint points: <b>{AP.HintPoints}</b>{(cost > 0 ? $"   (a hint costs {cost})" : "")}", Styles.Body);
+            Gui.Label($"Hint points: <b>{AP.HintPoints}</b>{(cost > 0 ? $"   (a hint costs {cost})" : "")}", Styles.Body);
         }
-        GUILayout.BeginHorizontal();
-        _hint.Draw(Styles.TextField, GUILayout.Height(28f), GUILayout.ExpandWidth(true));
-        if (GUILayout.Button("Hint item", Styles.ButtonSmall, GUILayout.Width(80f), GUILayout.Height(28f))) RequestHint(_hint.Text, false);
-        if (GUILayout.Button("Hint location", Styles.ButtonSmall, GUILayout.Width(100f), GUILayout.Height(28f))) RequestHint(_hint.Text, true);
+        Gui.BeginHorizontal();
+        _hint.Draw(Styles.TextField, Gui.HeightExpandWidth(28f));
+        if (Gui.Button("Hint item", Styles.ButtonSmall, Gui.Size(80f, 28f))) RequestHint(_hint.Text, false);
+        if (Gui.Button("Hint location", Styles.ButtonSmall, Gui.Size(100f, 28f))) RequestHint(_hint.Text, true);
         GUILayout.EndHorizontal();
 
         var wanted = new List<string>();
@@ -605,30 +777,31 @@ public class ModMenu : MonoBehaviour
         if (!ItemHandler.Has(GameData.StoneTech)) wanted.Add(GameData.StoneTech);
         if (!ItemHandler.Has(GameData.IronTech)) wanted.Add(GameData.IronTech);
         if (AP.Slot.UsesIslandUnlocks)
-            for (int i = 2; i <= AP.Slot.Campaign.IslandCount; i++)
+            for (int i = 2; i <= AP.Slot.IslandsInPlay; i++)
                 if (!ItemHandler.Has(GameData.IslandUnlock(i))) wanted.Add(GameData.IslandUnlock(i));
         if (wanted.Count > 0)
         {
-            GUILayout.Label("Quick hints for key items you don't have yet:", Styles.Dim);
+            Gui.Label("Quick hints for key items you don't have yet:", Styles.Dim);
             for (int i = 0; i < wanted.Count; i += 3)
             {
-                GUILayout.BeginHorizontal();
+                Gui.BeginHorizontal();
                 foreach (var name in wanted.Skip(i).Take(3))
-                    if (GUILayout.Button(name, Styles.ButtonSmall, GUILayout.Width(170f))) RequestHint(name, false);
+                    if (Gui.Button(name, Styles.ButtonSmall, Gui.Width(170f))) RequestHint(name, false);
                 GUILayout.EndHorizontal();
             }
         }
         if (!string.IsNullOrEmpty(AP.LastServerReply))
         {
             GUILayout.Space(4f);
-            GUILayout.Label("Server: " + AP.LastServerReply, Styles.Small);
+            Gui.Label("Server: " + AP.LastServerReply, Styles.Small);
         }
         EndCard();
 
         var hints = AP.Hints.OrderBy(h => h.Found).ThenBy(h => h.ReceivingPlayer != AP.SlotId).ToList();
         BeginCard($"HINTS ({hints.Count})");
-        if (hints.Count == 0) GUILayout.Label("No hints yet.", Styles.Dim);
-        foreach (var hint in hints)
+        if (hints.Count == 0) Gui.Label("No hints yet.", Styles.Dim);
+        int firstHint = Pager("hints", hints.Count);
+        foreach (var hint in hints.Skip(firstHint).Take(PageSize))
         {
             string receiver = hint.ReceivingPlayer == AP.SlotId ? $"<color={Styles.HexMe}>Your</color>" : $"<color={Styles.HexPlayer}>{AP.Escape(AP.PlayerName(hint.ReceivingPlayer))}'s</color>";
             string finder = hint.FindingPlayer == AP.SlotId ? $"<color={Styles.HexMe}>your</color>" : $"<color={Styles.HexPlayer}>{AP.Escape(AP.PlayerName(hint.FindingPlayer))}'s</color>";
@@ -636,7 +809,7 @@ public class ModMenu : MonoBehaviour
             string loc = $"<color={Styles.HexLocation}>{AP.Escape(AP.LocationName(hint.LocationId, hint.FindingPlayer))}</color>";
             string entrance = string.IsNullOrEmpty(hint.Entrance) ? "" : $" ({AP.Escape(hint.Entrance)})";
             string state = hint.Found ? $"<color={Styles.HexGood}>found</color>" : $"<color={Styles.HexGold}>not found</color>";
-            GUILayout.Label($"{receiver} {item} is at {loc} in {finder} world{entrance}  [{state}]", Styles.Small);
+            Gui.Label($"{receiver} {item} is at {loc} in {finder} world{entrance}  [{state}]", Styles.Small);
         }
         EndCard();
     }
@@ -658,11 +831,11 @@ public class ModMenu : MonoBehaviour
 
     private void DrawChatTab()
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Everything the server says: items for everyone, hints, chat and command replies.", Styles.Dim);
+        Gui.BeginHorizontal();
+        Gui.Label("Everything the server says: items for everyone, hints, chat and command replies.", Styles.Dim);
         GUILayout.FlexibleSpace();
-        if (GUILayout.Button(_chatOnlyMine ? "Showing: mine" : "Showing: all", Styles.ButtonSmall, GUILayout.Width(110f))) _chatOnlyMine = !_chatOnlyMine;
-        if (GUILayout.Button(_chatAutoScroll ? "Auto-scroll on" : "Auto-scroll off", Styles.ButtonSmall, GUILayout.Width(110f))) _chatAutoScroll = !_chatAutoScroll;
+        if (Gui.Button(_chatOnlyMine ? "Showing: mine" : "Showing: all", Styles.ButtonSmall, Gui.Width(110f))) _chatOnlyMine = !_chatOnlyMine;
+        if (Gui.Button(_chatAutoScroll ? "Auto-scroll on" : "Auto-scroll off", Styles.ButtonSmall, Gui.Width(110f))) _chatAutoScroll = !_chatAutoScroll;
         GUILayout.EndHorizontal();
 
         if (_chatAutoScroll && _chatSeenVersion != AP.LogVersion)
@@ -671,27 +844,27 @@ public class ModMenu : MonoBehaviour
             _chatSeenVersion = AP.LogVersion;
         }
 
-        _chatScroll = GUILayout.BeginScrollView(_chatScroll, Styles.Card, GUILayout.ExpandHeight(true));
+        _chatScroll = GUILayout.BeginScrollView(_chatScroll, Styles.Card, Gui.ExpandHeight);
         int shown = 0;
-        for (int i = Math.Max(0, AP.Log.Count - 250); i < AP.Log.Count; i++)
+        for (int i = Math.Max(0, AP.Log.Count - ChatLines); i < AP.Log.Count; i++)
         {
             var line = AP.Log[i];
             if (_chatOnlyMine && !line.RelatedToMe) continue;
-            GUILayout.Label(line.Text, Styles.LogLine);
+            Gui.Label(line.Text, Styles.LogLine);
             shown++;
         }
-        if (shown == 0) GUILayout.Label(AP.Connected ? "Nothing yet." : "Connect to see the server log.", Styles.Dim);
+        if (shown == 0) Gui.Label(AP.Connected ? "Nothing yet." : "Connect to see the server log.", Styles.Dim);
         GUILayout.EndScrollView();
 
-        GUILayout.BeginHorizontal();
-        _chat.Draw(Styles.TextField, GUILayout.Height(28f), GUILayout.ExpandWidth(true));
-        if (GUILayout.Button("Send", Styles.Button, GUILayout.Width(70f), GUILayout.Height(28f))) SendChat(_chat.Text);
+        Gui.BeginHorizontal();
+        _chat.Draw(Styles.TextField, Gui.HeightExpandWidth(28f));
+        if (Gui.Button("Send", Styles.Button, Gui.Size(70f, 28f))) SendChat(_chat.Text);
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
+        Gui.BeginHorizontal();
         foreach (var cmd in new[] { "!remaining", "!missing", "!hint", "!collect", "!release" })
         {
-            if (GUILayout.Button(cmd, Styles.ButtonSmall, GUILayout.Width(84f)))
+            if (Gui.Button(cmd, Styles.ButtonSmall, Gui.Width(84f)))
             {
                 if (cmd is "!collect" or "!release") _chat.Text = cmd;
                 else SendChat(cmd);
@@ -705,23 +878,23 @@ public class ModMenu : MonoBehaviour
     private void DrawDebugTab()
     {
         BeginCard("DEBUG");
-        GUILayout.Label("Give yourself any item or trap to see how it behaves. Debug grants only exist locally and are lost when the game closes. Sending a check below is real and goes to the server.", Styles.Dim);
+        Gui.Label("Give yourself any item or trap to see how it behaves. Debug grants only exist locally and are lost when the game closes. Sending a check below is real and goes to the server.", Styles.Dim);
         if (PillRow("Apply AP rules while not connected", ItemHandler.SimulateGating))
             ItemHandler.SimulateGating = !ItemHandler.SimulateGating;
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Clear debug grants", Styles.ButtonSmall, GUILayout.Width(150f))) ItemHandler.ClearDebugGrants();
-        GUILayout.Label($"{ItemHandler.DebugGrants.Values.Sum()} granted, {ItemHandler.PendingEffects} effect(s) queued, {Gating.BlockedCount} payable(s) blocked", Styles.Small);
+        Gui.BeginHorizontal();
+        if (Gui.Button("Clear debug grants", Styles.ButtonSmall, Gui.Width(150f))) ItemHandler.ClearDebugGrants();
+        Gui.Label($"{ItemHandler.DebugGrants.Values.Sum()} granted, {ItemHandler.PendingEffects} effect(s) queued, {Gating.BlockedCount} payable(s) blocked", Styles.Small);
         GUILayout.EndHorizontal();
-        if (!GameAccess.IsPlaying) GUILayout.Label($"<color={Styles.HexGold}>Effects wait until you're in a game.</color>", Styles.Small);
+        if (!GameAccess.IsPlaying) Gui.Label($"<color={Styles.HexGold}>Effects wait until you're in a game.</color>", Styles.Small);
         EndCard();
 
         BeginCard("GIVE ITEM");
         foreach (var group in GameData.ItemGroupsFor(AP.Slot.Campaign))
         {
-            GUILayout.Label(group.Title, Styles.Dim);
+            Gui.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
             {
-                GUILayout.BeginHorizontal();
+                Gui.BeginHorizontal();
                 foreach (var name in group.Names.Skip(i).Take(3))
                 {
                     var label = name;
@@ -730,7 +903,7 @@ public class ModMenu : MonoBehaviour
                         int n = ItemHandler.Count(name);
                         if (n > 0) label = $"{name} <color={Styles.HexGood}>({n})</color>";
                     }
-                    if (GUILayout.Button(label, Styles.ButtonSmall, GUILayout.Width(170f))) ItemHandler.DebugGive(name);
+                    if (Gui.Button(label, Styles.ButtonSmall, Gui.Width(170f))) ItemHandler.DebugGive(name);
                 }
                 GUILayout.EndHorizontal();
             }
@@ -738,58 +911,51 @@ public class ModMenu : MonoBehaviour
         EndCard();
 
         BeginCard("SIMULATE EVENTS");
-        GUILayout.Label("Bumps the counters the same way the game would (sends checks if a milestone is reached).", Styles.Dim);
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("+1 Night", Styles.ButtonSmall)) CheckTracker.AddMilestone(GameData.Milestone.Nights);
-        if (GUILayout.Button("+5 Trees", Styles.ButtonSmall)) CheckTracker.AddMilestone(GameData.Milestone.Trees, 5);
-        GUILayout.EndHorizontal();
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("+5 Greedlings", Styles.ButtonSmall)) for (int i = 0; i < 5; i++) CheckTracker.OnEnemyKilled(EnemyType.TrollWeak);
-        if (GUILayout.Button("+1 Floater", Styles.ButtonSmall)) CheckTracker.OnEnemyKilled(EnemyType.Squid);
-        if (GUILayout.Button("+1 Breeder", Styles.ButtonSmall)) CheckTracker.OnEnemyKilled(EnemyType.Boss);
-        if (GUILayout.Button("+1 Crown Stealer", Styles.ButtonSmall)) CheckTracker.OnEnemyKilled(EnemyType.Stealer);
-        GUILayout.EndHorizontal();
+        Gui.Label("Bumps the counters the same way the game would (sends checks if a milestone is reached).", Styles.Dim);
+        foreach (var row in SimulateRows) ButtonRow(row);
         EndCard();
 
         BeginCard("GAME STATE");
         DrawGameState();
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Skip to night", Styles.ButtonSmall)) SkipTime(toNight: true);
-        if (GUILayout.Button("Skip to day", Styles.ButtonSmall)) SkipTime(toNight: false);
-        if (GUILayout.Button("Refresh island census", Styles.ButtonSmall)) _census = Census();
-        if (GUILayout.Button("Dump campaign data", Styles.ButtonSmall)) Toast("Written to " + CampaignDump.Run());
+        Gui.BeginHorizontal();
+        if (Gui.Button("Skip to night", Styles.ButtonSmall)) SkipTime(toNight: true);
+        if (Gui.Button("Skip to day", Styles.ButtonSmall)) SkipTime(toNight: false);
+        if (Gui.Button("Refresh island census", Styles.ButtonSmall)) _census = Census();
+        if (Gui.Button("Dump campaign data", Styles.ButtonSmall)) Toast("Written to " + CampaignDump.Run());
         GUILayout.EndHorizontal();
-        GUILayout.Label(_census, Styles.Small);
+        Gui.Label(_census, Styles.Small);
         EndCard();
 
         BeginCard("SEND A CHECK");
         if (!AP.Connected)
         {
-            GUILayout.Label("Connect to send checks by hand.", Styles.Dim);
+            Gui.Label("Connect to send checks by hand.", Styles.Dim);
         }
         else
         {
-            GUILayout.Label("For when a check didn't fire. Click Send twice to confirm.", Styles.Dim);
-            foreach (var name in MissingLocations())
+            Gui.Label("For when a check didn't fire. Click Send twice to confirm.", Styles.Dim);
+            var missing = MissingLocations();
+            int firstMissing = Pager("send", missing.Count);
+            foreach (var name in missing.Skip(firstMissing).Take(PageSize))
             {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(AP.Escape(name), Styles.Small);
+                Gui.BeginHorizontal();
+                Gui.Label(AP.Escape(name), Styles.Small);
                 GUILayout.FlexibleSpace();
-                if (ConfirmButton("Send", "send:" + name, Styles.ButtonSmall, GUILayout.Width(70f))) AP.SendLocation(name);
+                if (ConfirmButton("Send", "send:" + name, Styles.ButtonSmall, Gui.Width(70f))) AP.SendLocation(name);
                 GUILayout.EndHorizontal();
             }
         }
         EndCard();
 
         BeginCard("RESET");
-        GUILayout.BeginHorizontal();
-        if (ConfirmButton("Reset milestone counters", "reset-counters", Styles.ButtonSmall, GUILayout.Width(200f)))
+        Gui.BeginHorizontal();
+        if (ConfirmButton("Reset milestone counters", "reset-counters", Styles.ButtonSmall, Gui.Width(200f)))
         {
             AP.State.Counters.Clear();
             AP.State.Dirty = true;
             Toast("Milestone counters reset.");
         }
-        if (ConfirmButton("Forget counted chests/portals", "reset-positions", Styles.ButtonSmall, GUILayout.Width(220f)))
+        if (ConfirmButton("Forget counted chests/portals", "reset-positions", Styles.ButtonSmall, Gui.Width(220f)))
         {
             AP.State.CountedPositions.Clear();
             AP.State.Dirty = true;
@@ -829,7 +995,7 @@ public class ModMenu : MonoBehaviour
         }
         catch (Exception e)
         {
-            GUILayout.Label($"(state unavailable: {AP.Escape(e.Message)})", Styles.Dim);
+            Gui.Label($"(state unavailable: {AP.Escape(e.Message)})", Styles.Dim);
         }
     }
 
@@ -902,17 +1068,17 @@ public class ModMenu : MonoBehaviour
         }
         float opacity = SliderRow("Menu opacity", s.MenuOpacity, 0.3f, 1f, "F2");
         if (Math.Abs(opacity - s.MenuOpacity) > 0.001f) { s.MenuOpacity = opacity; changed = true; }
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Menu key", Styles.Body, GUILayout.Width(170f));
-        if (GUILayout.Button(((KeyCode)s.MenuKey).ToString(), Styles.ButtonSmall, GUILayout.Width(100f)))
+        Gui.BeginHorizontal();
+        Gui.Label("Menu key", Styles.Body, Gui.Width(170f));
+        if (Gui.Button(((KeyCode)s.MenuKey).ToString(), Styles.ButtonSmall, Gui.Width(100f)))
         {
             int i = Array.IndexOf(MenuKeys, (KeyCode)s.MenuKey);
             s.MenuKey = (int)MenuKeys[(i + 1) % MenuKeys.Length];
             changed = true;
         }
-        GUILayout.Label("<color=#998C73>(if you also run Kingdom Enhanced, it uses F1, F3 and F4)</color>", Styles.Small);
+        Gui.Label("<color=#998C73>(if you also run Kingdom Enhanced, it uses F1, F3 and F4)</color>", Styles.Small);
         GUILayout.EndHorizontal();
-        if (GUILayout.Button("Reset window size and position", Styles.ButtonSmall, GUILayout.Width(240f)))
+        if (Gui.Button("Reset window size and position", Styles.ButtonSmall, Gui.Width(240f)))
         {
             _rect = new Rect(40f, 90f, 680f, 520f);
             s.WindowScale = 1f;
@@ -923,13 +1089,13 @@ public class ModMenu : MonoBehaviour
         EndCard();
 
         BeginCard("NOTIFICATION FEED");
-        GUILayout.Label("Items you send and receive, traps and connection news pop up in a screen corner even with the menu closed.", Styles.Dim);
+        Gui.Label("Items you send and receive, traps and connection news pop up in a screen corner even with the menu closed.", Styles.Dim);
         if (PillRow("Show the feed", s.FeedEnabled)) { s.FeedEnabled = !s.FeedEnabled; changed = true; }
         if (PillRow("Only my items (hide other players' sends and chat)", s.FeedOnlyMine)) { s.FeedOnlyMine = !s.FeedOnlyMine; changed = true; }
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Corner", Styles.Body, GUILayout.Width(170f));
+        Gui.BeginHorizontal();
+        Gui.Label("Corner", Styles.Body, Gui.Width(170f));
         string[] corners = { "Bottom right", "Bottom left", "Top right", "Top left" };
-        if (GUILayout.Button(corners[Mathf.Clamp(s.FeedCorner, 0, 3)], Styles.ButtonSmall, GUILayout.Width(120f)))
+        if (Gui.Button(corners[Mathf.Clamp(s.FeedCorner, 0, 3)], Styles.ButtonSmall, Gui.Width(120f)))
         {
             s.FeedCorner = (s.FeedCorner + 1) % 4;
             changed = true;
@@ -942,7 +1108,7 @@ public class ModMenu : MonoBehaviour
         if (Math.Abs(duration - s.FeedDuration) > 0.01f) { s.FeedDuration = Mathf.Round(duration); changed = true; }
         if (Mathf.RoundToInt(lines) != s.FeedLines) { s.FeedLines = Mathf.RoundToInt(lines); changed = true; }
         if (Math.Abs(feedScale - s.FeedScale) > 0.001f) { s.FeedScale = feedScale; changed = true; }
-        if (GUILayout.Button("Show a test notification", Styles.ButtonSmall, GUILayout.Width(200f)))
+        if (Gui.Button("Show a test notification", Styles.ButtonSmall, Gui.Width(200f)))
             Feed.Add($"<color={Styles.HexMe}>{AP.Escape(string.IsNullOrEmpty(AP.SlotName) ? "Monarch" : AP.SlotName)}</color> found their <color={Styles.HexProgression}>Stone Technology</color> (<color={Styles.HexLocation}>Island 1: Coin Chest 1</color>)");
         EndCard();
 

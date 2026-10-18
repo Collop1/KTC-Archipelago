@@ -78,7 +78,8 @@ internal static class Styles
         LogLine.margin = new RectOffset(2, 2, 1, 1);
         Credit = Label(9, TextDim, FontStyle.Normal, TextAnchor.LowerLeft);
 
-        Button = new GUIStyle(GUI.skin.button) { fontSize = 12, richText = true, padding = new RectOffset(8, 8, 5, 5) };
+        // No word wrap: the game's skin wraps button text, which spills a narrow button's label over two clipped lines.
+        Button = new GUIStyle(GUI.skin.button) { fontSize = 12, richText = true, wordWrap = false, padding = new RectOffset(8, 8, 5, 5) };
         Button.normal.background = btn;
         Button.hover.background = btnHot;
         Button.active.background = btnActive;

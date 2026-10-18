@@ -73,19 +73,25 @@ internal static class ItemHandler
     {
         var who = string.IsNullOrEmpty(source) ? "Someone" : source;
         Feed.Add($"<color=#FA8072>DeathLink: {AP.Escape(who)} died{(string.IsNullOrEmpty(cause) ? "" : $" ({AP.Escape(cause)})")}</color>");
-        switch (AP.Slot.DeathLinkEffect)
+        Effects.Enqueue((AP.Slot.DeathLinkEffect switch
         {
-            case 1:
-                Effects.Enqueue((GameData.SlipperyPouchTrap, "DeathLink"));
-                break;
-            case 2:
-                Effects.Enqueue((GameData.SlipperyPouchTrap, "DeathLink"));
-                Effects.Enqueue((GameData.TripTrap, "DeathLink"));
-                break;
-            default:
-                Effects.Enqueue((GameData.TripTrap, "DeathLink"));
-                break;
-        }
+            0 => DeathLinkCrown,
+            1 => DeathLinkWallet,
+            _ => DeathLinkBoth, // 2, or 3 from seeds made when "harsh" was its own choice
+        }, "DeathLink"));
+    }
+
+    // Internal effect names for DeathLinks (not items).
+    private const string DeathLinkCrown = "DeathLink: Crown";
+    private const string DeathLinkWallet = "DeathLink: Wallet";
+    private const string DeathLinkBoth = "DeathLink: Both";
+
+    private static bool IsDeathLink(string effect) => effect is DeathLinkCrown or DeathLinkWallet or DeathLinkBoth;
+
+    public static void DebugDeathLink()
+    {
+        Effects.Enqueue((DeathLinkBoth, "Debug"));
+        _nextTrapTime = 0f;
     }
 
     public static int PendingEffects => Effects.Count;
@@ -111,7 +117,7 @@ internal static class ItemHandler
         while (Effects.Count > 0)
         {
             var (itemName, source) = Effects.Peek();
-            bool isTrap = GameData.KindOf(itemName) == GameData.ItemKind.Trap;
+            bool isTrap = GameData.KindOf(itemName) == GameData.ItemKind.Trap || IsDeathLink(itemName);
             if (isTrap && Time.unscaledTime < _nextTrapTime) break;
             Effects.Dequeue();
             try
@@ -134,8 +140,11 @@ internal static class ItemHandler
     {
         switch (itemName)
         {
+            case GameData.GemPouch:
+                ItemEffects.GiveCurrency(CurrencyType.Gems, GameData.GemsPerPouch);
+                return;
             case GameData.CoinPouch:
-                ItemEffects.GiveCurrency(CurrencyType.Coins, 5);
+                ItemEffects.GiveCurrency(CurrencyType.Coins, UnityEngine.Random.Range(3, 8));
                 return;
             case GameData.CoinSack:
                 ItemEffects.GiveCurrency(CurrencyType.Coins, 10);
@@ -163,6 +172,24 @@ internal static class ItemHandler
                 return;
             case GameData.DecayTrap:
                 ItemEffects.Decay(source);
+                return;
+            case GameData.StamDamTrap:
+                ItemEffects.StamDam(source);
+                return;
+            case GameData.DesertionTrap:
+                ItemEffects.Desertion(source, AP.Slot.BadKingAmount);
+                return;
+            case GameData.ToolTheftTrap:
+                ItemEffects.ToolTheft(source, AP.Slot.BadKingAmount);
+                return;
+            case DeathLinkCrown:
+                ItemEffects.DeathLink(source, crown: true, wallet: false);
+                return;
+            case DeathLinkWallet:
+                ItemEffects.DeathLink(source, crown: false, wallet: true);
+                return;
+            case DeathLinkBoth:
+                ItemEffects.DeathLink(source, crown: true, wallet: true);
                 return;
         }
         if (Array.IndexOf(GameData.JunkItems, itemName) >= 0)

@@ -10,6 +10,8 @@ internal static class GameLosePatch
 {
     private static void Prefix()
     {
+        try { CheckTracker.OnDeath(); }
+        catch (Exception e) { Plugin.Log.LogError($"[AP] Lose patch (nights): {e}"); }
         try
         {
             // Don't echo a death that a received DeathLink just caused.
@@ -86,7 +88,10 @@ internal static class MapLandUnlockedPatch
     {
         try
         {
-            if (Gating.IslandGatingActive) unlocked = Gating.IsIslandUnlocked(GameAccess.LandToIsland(__instance.land));
+            if (!Gating.IslandGatingActive) return;
+            bool allowed = Gating.IsIslandUnlocked(GameAccess.LandToIsland(__instance.land));
+            // With island unlocks the items decide; otherwise the game does, except past the seed's last island.
+            unlocked = AP.Slot.UsesIslandUnlocks ? allowed : unlocked && allowed;
         }
         catch (Exception e) { Plugin.Log.LogError($"[AP] Map land patch: {e}"); }
     }
@@ -101,7 +106,7 @@ internal static class SailAwayPatch
     {
         try
         {
-            if (!Gating.IslandGatingActive) return;
+            if (!Gating.IslandGatingActive || !AP.Slot.UsesIslandUnlocks) return;
             var campaign = CampaignSaveData.current;
             if (campaign == null) return;
             int wanted = GameAccess.IslandToLand(Gating.HighestUnlockedIsland());
@@ -129,8 +134,8 @@ internal static class SetCurrentLandPatch
 
             int current = GameAccess.CurrentIsland;
             int best = 0;
-            int count = AP.Slot.Campaign.IslandCount;
-            for (int distance = 1; distance < count && best == 0; distance++)
+            int count = AP.Slot.IslandsInPlay;
+            for (int distance = 1; distance < AP.Slot.Campaign.IslandCount && best == 0; distance++)
             {
                 foreach (var candidate in new[] { target + distance, target - distance })
                 {
@@ -142,7 +147,9 @@ internal static class SetCurrentLandPatch
             }
             if (best == 0) best = current > 0 ? current : 1;
             Plugin.Log.LogWarning($"[AP] Island {target} is locked; sailing to island {best} instead");
-            Feed.Add($"<color=#FA8072>Island {target} is still locked. Sailing to Island {best} instead.</color>");
+            Feed.Add(target > AP.Slot.IslandsInPlay
+                ? $"<color=#FA8072>Island {target} isn't part of this seed. Sailing to Island {best} instead.</color>"
+                : $"<color=#FA8072>Island {target} is still locked. Sailing to Island {best} instead.</color>");
             land = GameAccess.IslandToLand(best);
         }
         catch (Exception e) { Plugin.Log.LogError($"[AP] Set land patch: {e}"); }

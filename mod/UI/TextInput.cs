@@ -1,4 +1,5 @@
 using System;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace APKingdom2Crown;
@@ -24,7 +25,7 @@ internal sealed class TextInput
     public void Focus() => _focused = this;
     public static void ClearFocus() => _focused = null;
 
-    public void Draw(GUIStyle style, params GUILayoutOption[] options)
+    public void Draw(GUIStyle style, Il2CppReferenceArray<GUILayoutOption> options)
     {
         string shown;
         if (Text.Length == 0 && !Focused)
@@ -36,7 +37,7 @@ internal sealed class TextInput
             shown = Masked ? new string('*', Text.Length) : AP.Escape(Text);
             if (Focused) shown += (Time.unscaledTime % 1f) < 0.55f ? "|" : " ";
         }
-        if (GUILayout.Button(shown, Focused ? Styles.TextFieldFocused : style, options)) Focus();
+        if (Gui.Button(shown, Focused ? Styles.TextFieldFocused : style, options)) Focus();
     }
 
     // Main thread, once per frame.

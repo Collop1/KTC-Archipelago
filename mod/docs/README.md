@@ -44,6 +44,11 @@ Press **F2** in game to open the Archipelago menu:
 Text boxes are typed into directly (click, type, Enter). The game's own text field is stripped from this build, so the
 menu reads the keyboard itself and stops your monarch moving while you type.
 
+The menu is drawn into a cached picture whenever something could have changed (mouse movement, clicks, keys,
+typing, and a few times a second otherwise) and that picture is shown in between. Drawing IMGUI every frame through
+the IL2CPP interop made enough garbage to trigger the game's full (non-incremental) garbage collections several
+times a second, which tanked the frame rate while the menu was open.
+
 The notification feed in the bottom-right corner shows items you send and receive, traps and connection news even
 with the menu closed.
 
@@ -57,6 +62,8 @@ this quick:
    Trip should drop the crown so you can pick it back up. Slippery Pouch should scatter coins and gems. Wave Back
    should send Greed from a portal. Damned Night should jump to dusk. Decay should lower or break the outermost walls.
    Waves Gone By only shows on the next waves; the log prints `SpawnWave ... offset=` for every wave.
+   Stam Dam should tire your mount. Desertion should turn villagers and workers back into vagrants. Tool Theft
+   should empty rack slots first, then turn workers back into villagers.
 2. **Gating**: turn on "Apply AP rules while not connected", then check that the castle can't be upgraded without
    Progressive Castle, statues/hermits/mounts refuse payment without their item, and the boat won't sail without an
    island unlock. Grant the item and the block should lift within half a second.
@@ -69,6 +76,16 @@ this quick:
 6. **DLC campaigns**: Dead Lands ruler statues, Norselands god puzzles and Call of Olympus quests each send their own
    check, and Items of Power refuse to activate until their "Power of ..." item arrives. Puzzles and quests already
    done before you first connected to a seed don't count, so start the campaign after connecting.
+7. **Sanity checks**: chests should open with nothing inside. Build a wall, tower, farm or citizen house, recruit a
+   vagrant, buy a bow or hammer, hunt a deer, let a Greedling grab a coin, feed your mount on grass and drop a coin in
+   the sea: each should tick its counter in the Checks tab. The log prints `New Walls at x=...` for buildings and
+   `Animal killed: ...` for hunts. Buildings already standing the first time you visit an island don't count.
+   Building the quarry, mine or a hermit's building should send its check straight away.
+8. **DeathLink**: Debug > Simulate events > "DeathLink" (or have a friend die). Your coins should vanish, your gems
+   should show as stolen in the Items tab, and the crown should land off screen towards the nearest portal; the log
+   prints `Flinging crown from x=... to x=...`. "Die (nights to 0)" resets the nights-survived count like losing
+   your crown does.
+9. **Desertion**: the subjects it takes should turn into vagrants and vanish a moment later.
 
 ### Where the per-island numbers come from
 

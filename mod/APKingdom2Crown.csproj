@@ -4,7 +4,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>APKingdom2Crown</AssemblyName>
     <Product>Archipelago Randomizer</Product>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <RestoreAdditionalProjectSources>

@@ -6,6 +6,10 @@ dumped with the mod's Debug > "Dump campaign data" button), so they're exact rat
     Portal -> regular portals (the cliff portal is liberation), Statue*/Steed*/HermitHouse* -> statues,
     mount shrines and hermit cabins, Dog, UnlockNewRulerStatue (Dead Lands), Puzzle*Norselands.
 
+Gem costs: chests give nothing but their check in this randomizer, so gems only come from "Gem Pouch"
+items, and gem-cost checks need enough of them in logic. The base campaign's costs are known per island;
+the DLCs' are estimated at 3 gems per statue, shrine or cabin.
+
 Shogun reuses the base campaign's island layouts with its own mounts. Call of Olympus is different: its
 statues, shrines, hermits, gem chests and dog are scattered at random over its god and quest islands each
 campaign, so its checks are counted campaign-wide instead of per island.
@@ -36,6 +40,26 @@ class Campaign(NamedTuple):
     dog_island: int = 2
     # Campaign-wide content (Olympus only)
     totals: Optional[IslandContent] = None
+    quarry_island: int = 0  # Stone Quarry / Iron Mine buildings; 0 = somewhere random (Olympus)
+    mine_island: int = 0
+    hermit_islands: dict[str, int] = {}  # hermit item -> island of its cabin (numbered campaigns)
+    gem_costs: dict[int, int] = {}  # island -> total gems its statues, shrines and cabins cost
+
+    def gem_cost(self, island: int) -> int:
+        if island in self.gem_costs:
+            return self.gem_costs[island]
+        content = self.islands[island]
+        return GEM_COST_ESTIMATE * (content.statues + content.mount_shrines + content.hermit_cabins)
+
+    def cumulative_gem_cost(self, island: int) -> int:
+        """Gems needed to pay for everything on this island and every island before it."""
+        return sum(self.gem_cost(i) for i in self.islands if i <= island)
+
+    @property
+    def total_gem_cost(self) -> int:
+        if self.is_campaign_wide:
+            return GEM_COST_ESTIMATE * (self.totals.statues + self.totals.mount_shrines + self.totals.hermit_cabins)
+        return self.cumulative_gem_cost(max(self.islands))
 
     @property
     def island_count(self) -> int:
@@ -46,8 +70,15 @@ class Campaign(NamedTuple):
         return self.totals is not None
 
 
+GEM_COST_ESTIMATE = 3
+
 STATUES_BASE = ("Statue of Archery", "Statue of Farming", "Statue of Building", "Statue of Knights")
 HERMITS_BASE = ("Ballista Hermit", "Stable Hermit", "Bakery Hermit", "Warrior Hermit", "Horn Hermit")
+BASE_HERMIT_ISLANDS = {"Ballista Hermit": 1, "Stable Hermit": 2, "Bakery Hermit": 3, "Warrior Hermit": 4, "Horn Hermit": 5}
+# Base campaign gem costs: island 1 archery statue 3 + griffin 2 + ballista 3, island 2 farming 1 + stag 1 +
+# stable 1, island 3 building 3 + warhorse 2 + draft horse 1 + bakery 4, island 4 bear 3 + lizard 3 + warrior 2,
+# island 5 knights 2 + unicorn 4 + horn 3.
+BASE_GEM_COSTS = {1: 8, 2: 3, 3: 10, 4: 8, 5: 9}
 
 BASE_ISLANDS = {
     1: IslandContent(coin_chests=3, gem_chests=0, portals=0, statues=1, mount_shrines=1, hermit_cabins=1),
@@ -91,24 +122,29 @@ OLYMPUS_OTHER_QUESTS = ("Oracle", "Artemis's Island", "Athena's Island", "Hephae
 CAMPAIGNS: dict[str, Campaign] = {
     "two_crowns": Campaign(
         key="two_crowns", display="Two Crowns", biome_index=0, islands=BASE_ISLANDS,
+        quarry_island=2, mine_island=4, hermit_islands=BASE_HERMIT_ISLANDS, gem_costs=BASE_GEM_COSTS,
         statues=STATUES_BASE, hermits=HERMITS_BASE,
         mounts=("Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount",
                 "Unicorn Mount"),
     ),
     "shogun": Campaign(
         key="shogun", display="Shogun", biome_index=1, islands=BASE_ISLANDS,
+        quarry_island=2, mine_island=4, hermit_islands=BASE_HERMIT_ISLANDS, gem_costs=BASE_GEM_COSTS,
         statues=STATUES_BASE, hermits=HERMITS_BASE,
         mounts=("Griffin Mount", "Stag Mount", "Stamina Horse", "Warhorse Mount", "Bear Mount", "Lizard Mount",
                 "Kirin Mount"),
     ),
     "dead_lands": Campaign(
         key="dead_lands", display="Dead Lands", biome_index=2, islands=DEAD_LANDS_ISLANDS,
+        quarry_island=2, mine_island=4, hermit_islands=BASE_HERMIT_ISLANDS, gem_costs=BASE_GEM_COSTS,
         statues=STATUES_BASE, hermits=HERMITS_BASE,
         mounts=("Gamigin Mount", "Stag Mount", "Bear Mount", "Golem Mount", "Lizard Mount", "Beetle Mount",
                 "Unicorn Mount"),
     ),
     "norselands": Campaign(
         key="norselands", display="Norselands", biome_index=3, islands=NORSELANDS_ISLANDS,
+        quarry_island=2, mine_island=5,
+        hermit_islands={"Horn Hermit": 1, "Bakery Hermit": 2, "Ballista Hermit": 3, "Stable Hermit": 4, "Warrior Hermit": 6},
         statues=STATUES_BASE, hermits=HERMITS_BASE,
         mounts=("Hrimfaxe Mount", "Cat Cart Mount", "Reindeer Mount", "Sleipnir Mount", "Kelpie Mount",
                 "Gullinbursti Mount", "Wolf Mount"),

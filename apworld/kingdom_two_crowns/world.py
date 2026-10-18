@@ -5,13 +5,13 @@ from worlds.AutoWorld import World
 from . import items, locations, regions, rules
 from .campaigns import CAMPAIGN_BY_OPTION, CAMPAIGNS, Campaign
 from .items import KingdomTwoCrownsItem
-from .locations import MILESTONES
+from .locations import MILESTONES, milestone_interval, milestone_thresholds
 from .options import KingdomTwoCrownsOptions
 from .regions import OLYMPUS_REGION
 from .web_world import KingdomTwoCrownsWebWorld
 
 # Bump when slot_data changes shape so the mod can warn about a mismatched apworld.
-SLOT_DATA_VERSION = 3
+SLOT_DATA_VERSION = 6
 
 
 class KingdomTwoCrownsWorld(World):
@@ -36,9 +36,17 @@ class KingdomTwoCrownsWorld(World):
     origin_region_name = "Menu"
 
     campaign: Campaign
+    # Numbered islands that are part of this seed (empty for Call of Olympus, which is one campaign-wide region).
+    islands_in_play: list[int]
 
     def generate_early(self) -> None:
         self.campaign = CAMPAIGNS[CAMPAIGN_BY_OPTION[self.options.campaign.value]]
+        self.islands_in_play = []
+        if not self.campaign.is_campaign_wide:
+            last = self.campaign.island_count
+            if self.options.only_goal_islands:
+                last = min(self.options.islands_to_liberate.value, last)
+            self.islands_in_play = [island for island in sorted(self.campaign.islands) if island <= last]
 
     @property
     def home_region(self) -> str:
@@ -73,14 +81,18 @@ class KingdomTwoCrownsWorld(World):
                 "vagrants_per_item",
                 "death_link",
                 "death_link_effect",
+                "stolen_gems_return_nights",
+                "bad_king_amount",
             ),
         }
-        # The mod rebuilds every milestone location name from these.
+        # Islands the boat may go to (1..N); 0 for Call of Olympus, which doesn't limit islands.
+        data["play_islands"] = len(self.islands_in_play)
+        # The mod rebuilds every milestone location name from these (building sanity: interval 1).
         data["milestones"] = {
             category: {
-                "interval": getattr(self.options, milestone.interval_option).value,
-                "count": getattr(self.options, milestone.count_option).value,
+                "interval": milestone_interval(self, category),
+                "count": len(milestone_thresholds(self, category)),
             }
-            for category, milestone in MILESTONES.items()
+            for category in MILESTONES
         }
         return data

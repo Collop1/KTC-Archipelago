@@ -148,6 +148,96 @@ internal static class CheckTracker
     {
         foreach (var milestone in AP.Slot.Milestones.Keys)
             SendReachedMilestones(milestone, MilestoneCount(milestone));
+        SendCounterCheck(GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
+        SendCounterCheck(SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
+    }
+
+    // --- One-off checks ---
+
+    public const string GrassCounter = "Grass";
+    public const string SunkCoinsCounter = "SunkCoins";
+
+    private static void SendCounterCheck(string counter, int target, string location)
+    {
+        if (AP.State.Counter(counter) >= target && !AP.IsChecked(location)) AP.SendLocation(location);
+    }
+
+    public static void OnGrassEaten()
+    {
+        if (!Tracking) return;
+        AP.State.AddCounter(GrassCounter, 1);
+        SendCounterCheck(GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
+    }
+
+    public static void OnCoinSunk()
+    {
+        if (!Tracking) return;
+        int sunk = AP.State.AddCounter(SunkCoinsCounter, 1);
+        if (sunk == GameData.SunkCoinsTarget) Feed.Add("<color=#6D8BE8>The sea has claimed 25 of your coins.</color>");
+        SendCounterCheck(SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
+    }
+
+    public static void OnTechBuilding(TechnologyAge age)
+    {
+        if (!Tracking) return;
+        var campaign = AP.Slot.Campaign;
+        var name = age switch
+        {
+            TechnologyAge.Stone => GameData.QuarryLocation(campaign),
+            TechnologyAge.Iron => GameData.MineLocation(campaign),
+            _ => null,
+        };
+        Plugin.Log.LogInfo($"[AP] Tech building built: {age}");
+        if (name != null && !AP.IsChecked(name)) AP.SendLocation(name);
+    }
+
+    public static void OnHermitBuilding(Hermit.HermitType type)
+    {
+        if (!Tracking) return;
+        if (!GameData.HermitBuildingLocations.TryGetValue(type, out var name)) return;
+        if (!AP.IsChecked(name)) AP.SendLocation(name);
+    }
+
+    public static void OnAnimalKilled(GameData.Milestone? kind)
+    {
+        if (!Tracking) return;
+        AddMilestone(GameData.Milestone.Animals);
+        if (kind.HasValue) AddMilestone(kind.Value);
+    }
+
+    // --- Building sanity ---
+    // Buildings are noticed by polling: a wall, tower, farm or citizen house at a new x position on this island
+    // counts once. Whatever already stood the first time an island was looked at doesn't count.
+
+    private static float _nextBuildingPoll;
+
+    private static void PollBuildings()
+    {
+        if (Time.unscaledTime < _nextBuildingPoll) return;
+        _nextBuildingPoll = Time.unscaledTime + 2f;
+        int land = GameAccess.CurrentLand;
+        if (land < 0) return;
+        CountBuildings(GameData.Milestone.Walls, land, Object.FindObjectsByType<Wall>(FindObjectsSortMode.None).Where(w => w != null && w.gameObject.activeInHierarchy).Select(w => w.transform.position.x));
+        CountBuildings(GameData.Milestone.Towers, land, Object.FindObjectsByType<Tower>(FindObjectsSortMode.None).Where(t => t != null && t.gameObject.activeInHierarchy).Select(t => t.transform.position.x));
+        CountBuildings(GameData.Milestone.Farms, land, Object.FindObjectsByType<Farmland>(FindObjectsSortMode.None).Where(f => f != null && f.gameObject.activeInHierarchy).Select(f => f.transform.position.x));
+        CountBuildings(GameData.Milestone.CitizenHouses, land, Object.FindObjectsByType<CitizenHousePayable>(FindObjectsSortMode.None).Where(c => c != null && c.gameObject.activeInHierarchy).Select(c => c.transform.position.x));
+    }
+
+    private static void CountBuildings(GameData.Milestone kind, int land, IEnumerable<float> positions)
+    {
+        var state = AP.State;
+        var key = $"Built:{kind}@L{land}";
+        bool firstLook = !state.CountedPositions.TryGetValue(key, out var known);
+        if (firstLook) state.CountedPositions[key] = known = new List<float>();
+        foreach (var x in positions)
+        {
+            if (known.Any(p => Mathf.Abs(p - x) < SamePositionTolerance)) continue;
+            known.Add(x);
+            state.Dirty = true;
+            if (firstLook) continue;
+            AddMilestone(kind);
+            Plugin.Log.LogInfo($"[AP] New {kind} at x={x:F0} (total {MilestoneCount(kind)})");
+        }
     }
 
     // --- Polling ---
@@ -169,6 +259,8 @@ internal static class CheckTracker
         try { PollLiberation(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollLiberation: {e.Message}"); }
         try { PollPuzzles(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollPuzzles: {e.Message}"); }
         try { PollQuests(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollQuests: {e.Message}"); }
+        try { PollBuildings(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollBuildings: {e.Message}"); }
+        try { StolenGems.Poll(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] StolenGems: {e.Message}"); }
 
         if (Time.unscaledTime >= _nextFullUpgradePoll)
         {
@@ -188,9 +280,23 @@ internal static class CheckTracker
             AddMilestone(GameData.Milestone.Nights);
             int nights = MilestoneCount(GameData.Milestone.Nights);
             Feed.Add($"<color=#FFD27F>Dawn breaks. Nights survived: {nights}</color>");
+            StolenGems.OnNightSurvived();
         }
         _wasDaytime = day;
         _dayIsland = island;
+    }
+
+    // Losing your crown ends your reign: the nights-survived count starts again from zero. Checks already sent stay
+    // sent; the next one needs that many nights in a row.
+    public static void OnDeath()
+    {
+        if (!Tracking) return;
+        int nights = MilestoneCount(GameData.Milestone.Nights);
+        if (nights == 0) return;
+        AP.State.Counters[GameData.Milestone.Nights.ToString()] = 0;
+        AP.State.Dirty = true;
+        Feed.Add($"<color=#FA8072>Your reign has ended. Nights survived reset to 0 (was {nights}).</color>");
+        Plugin.Log.LogInfo($"[AP] Died: nights survived reset from {nights}");
     }
 
     private static void PollIsland()

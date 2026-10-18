@@ -9,7 +9,7 @@ namespace APKingdom2Crown;
 //  - castle upgrades beyond the Progressive Castle count
 //  - activating a statue's blessing, paying a freed hermit, or riding a mount without its item
 //  - using an Item of Power without its "Power of ..." item (patched in PowerPatches)
-//  - setting sail when no other island is unlocked
+//  - setting sail when no other island is unlocked, and sailing past the seed's last island (Only Goal Islands)
 // The first payment on statues/shrines/cabins (the gem cost) is always allowed, since that's the check.
 // Also keeps the kingdom's stone/iron tech in line with the Stone/Iron Technology items.
 internal static class Gating
@@ -22,17 +22,20 @@ internal static class Gating
     // Off while playing a different campaign from the seed's, so a wrong campaign isn't locked up.
     public static bool Active => ItemHandler.GatingActive && GameAccess.CampaignMatches;
 
-    public static bool IslandGatingActive => Active && AP.Slot.UsesIslandUnlocks;
+    public static bool IslandGatingActive => Active && (AP.Slot.UsesIslandUnlocks || AP.Slot.IslandsLimited);
 
+    // Whether the boat may take you to this island. Without island unlocks the game still opens islands in order;
+    // this only ever forbids, so islands past the seed's last one stay shut.
     public static bool IsIslandUnlocked(int island)
     {
         if (island <= 1 || !IslandGatingActive) return true;
-        return ItemHandler.Has(GameData.IslandUnlock(island));
+        if (island > AP.Slot.IslandsInPlay) return false;
+        return !AP.Slot.UsesIslandUnlocks || ItemHandler.Has(GameData.IslandUnlock(island));
     }
 
     public static int HighestUnlockedIsland()
     {
-        for (int island = AP.Slot.Campaign.IslandCount; island >= 1; island--)
+        for (int island = AP.Slot.IslandsInPlay; island >= 1; island--)
             if (IsIslandUnlocked(island)) return island;
         return 1;
     }
@@ -40,7 +43,7 @@ internal static class Gating
     public static bool CanSailSomewhere()
     {
         int current = GameAccess.CurrentIsland;
-        for (int island = 1; island <= AP.Slot.Campaign.IslandCount; island++)
+        for (int island = 1; island <= AP.Slot.IslandsInPlay; island++)
             if (island != current && IsIslandUnlocked(island)) return true;
         return false;
     }

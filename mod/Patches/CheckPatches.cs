@@ -150,7 +150,11 @@ internal static class EnemyKillTracking
         {
             if (!damageable.isDead) return;
             var enemy = damageable.GetComponent<Enemy>();
-            if (enemy == null) return;
+            if (enemy == null)
+            {
+                AnimalKilled(damageable);
+                return;
+            }
 
             float now = Time.unscaledTime;
             if (RecentKills.TryGetValue(damageable.Pointer, out var when) && now - when < 2f) return;
@@ -160,6 +164,24 @@ internal static class EnemyKillTracking
             CheckTracker.OnEnemyKilled(enemy.Type);
         }
         catch (Exception e) { Plugin.Log.LogError($"[AP] Kill tracking: {e}"); }
+    }
+
+    // Animal sanity: deer, rabbits (critters) and boars, plus golden hinds and anything else for the total.
+    private static void AnimalKilled(Damageable damageable)
+    {
+        GameData.Milestone? kind =
+            damageable.GetComponent<Deer>() != null ? GameData.Milestone.Deer
+            : damageable.GetComponent<Boar>() != null ? GameData.Milestone.Boars
+            : damageable.GetComponent<Critter>() != null ? GameData.Milestone.Rabbits
+            : null;
+        bool isAnimal = kind.HasValue || damageable.GetComponent<Hind>() != null;
+        if (!isAnimal) return;
+
+        float now = Time.unscaledTime;
+        if (RecentKills.TryGetValue(damageable.Pointer, out var when) && now - when < 2f) return;
+        RecentKills[damageable.Pointer] = now;
+        Plugin.Log.LogInfo($"[AP] Animal killed: {(kind?.ToString() ?? "other")}");
+        CheckTracker.OnAnimalKilled(kind);
     }
 }
 
