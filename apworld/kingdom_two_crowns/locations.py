@@ -10,8 +10,6 @@ the first coin chest you open on island 3 sends "Island 3: Coin Chest 1", the ne
 and so on, whichever physical chest it was. Call of Olympus scatters its content randomly, so its checks
 are counted over the whole campaign ("Coin Chest 7").
 """
-from fractions import Fraction
-from math import floor
 from typing import NamedTuple
 
 from BaseClasses import Location
@@ -19,7 +17,7 @@ from BaseClasses import Location
 from .campaigns import (
     CAMPAIGNS, MAX_ISLANDS, OLYMPUS_GOD_QUESTS, OLYMPUS_ISLANDS, OLYMPUS_OTHER_QUESTS, IslandContent,
 )
-from .options import MAX_MILESTONES_PER_ISLAND
+from .options import MAX_CAMPAIGN_MILESTONE_CHECKS, MAX_ISLAND_MILESTONE_CHECKS
 
 LOC_BASE = 7_560_000
 OLYMPUS_BASE = 7_580_000
@@ -102,12 +100,10 @@ HERMIT_BUILDINGS: dict[str, str] = {
 }
 
 GRASS_LOCATION = "Eat Grass 100 Times"
-WATER_LOCATION = "Sink 25 Coins"
 
 DOG_LOCATION = "Island 2: Free the Dog"
 OLYMPUS_DOG_LOCATION = "Free the Dog"
 OLYMPUS_GOAL_LOCATION = "Defeat the World Serpent"
-FULL_UPGRADE_LOCATION = "Fully Upgrade an Island"
 
 
 def castle_level_name(level: int) -> str:
@@ -117,64 +113,79 @@ def castle_level_name(level: int) -> str:
 CASTLE_LEVELS = range(2, 8)
 
 
+ISLAND = "island"      # counted separately on each island: "Island 3: Slay Greed 100"
+CAMPAIGN = "campaign"  # counted over the whole campaign: "Slay Breeders 3"
+
+
 class Milestone(NamedTuple):
-    template: str  # formatted with n = threshold
-    interval_option: str  # "" for building sanity: one check per building
-    count_option: str  # checks per island to liberate (building sanity: the on/off toggle)
+    template: str  # formatted with n = threshold; "<verb> <thing> {n}" so lists sort by kind
+    interval_option: str
+    count_option: str  # checks per island (ISLAND) or checks (CAMPAIGN)
     intervals: tuple[int, ...]
     id_slot: int
+    scope: str
+    only: tuple[str, ...] = ()  # campaigns that have this kind (empty = all)
+    exclude: tuple[str, ...] = ()  # campaigns that don't
 
 
 MILESTONES: dict[str, Milestone] = {
-    "greed": Milestone("Slay {n} Greed", "greed_kill_interval", "greed_kill_checks", (25, 50, 100, 200), 0),
-    "greedlings": Milestone("Slay {n} Greedlings", "greedling_kill_interval", "greedling_kill_checks",
-                            (25, 50, 100, 200), 1),
-    "floaters": Milestone("Slay {n} Floaters", "floater_kill_interval", "floater_kill_checks", (5, 10, 20, 50), 2),
-    "breeders": Milestone("Slay {n} Breeders", "breeder_kill_interval", "breeder_kill_checks", (2, 3, 5, 10), 3),
-    "crown_stealers": Milestone("Slay {n} Crown Stealers", "crown_stealer_kill_interval",
-                                "crown_stealer_kill_checks", (2, 3, 5, 10), 4),
-    "nights": Milestone("Survive {n} Nights", "night_interval", "night_checks", (3, 5, 10, 15), 5),
-    "trees": Milestone("Fell {n} Trees", "tree_interval", "tree_checks", (5, 10, 20, 25), 6),
-    # Building sanity: one check per new building (not upgrades), counted over the whole campaign
-    "walls": Milestone("Build Wall {n}", "", "building_sanity", (1,), 7),
-    "towers": Milestone("Build Archer Tower {n}", "", "building_sanity", (1,), 8),
-    "farms": Milestone("Build Farm {n}", "", "building_sanity", (1,), 9),
-    "citizen_houses": Milestone("Build Citizen House {n}", "", "building_sanity", (1,), 10),
+    "greed": Milestone("Slay Greed {n}", "greed_kill_interval", "greed_kill_checks", (25, 50, 100, 200), 0, ISLAND),
+    "greedlings": Milestone("Slay Greedlings {n}", "greedling_kill_interval", "greedling_kill_checks",
+                            (25, 50, 100, 200), 1, ISLAND),
+    # Greed only some campaigns have (from each campaign's wave profiles): left out of the others.
+    "floaters": Milestone("Slay Floaters {n}", "floater_kill_interval", "floater_kill_checks", (2, 3, 5, 10), 2,
+                          CAMPAIGN, only=("two_crowns", "shogun", "dead_lands", "call_of_olympus")),
+    "chargers": Milestone("Slay Chargers {n}", "charger_kill_interval", "charger_kill_checks", (1, 2, 3, 5), 22,
+                          CAMPAIGN, only=("norselands", "call_of_olympus")),
+    "greed_knights": Milestone("Slay Greed Knights {n}", "greed_knight_kill_interval", "greed_knight_kill_checks",
+                               (1, 2, 3), 24, CAMPAIGN, only=("call_of_olympus",)),
+    "breeders": Milestone("Slay Breeders {n}", "breeder_kill_interval", "breeder_kill_checks", (1, 2, 3, 5), 3, CAMPAIGN),
+    "crown_stealers": Milestone("Slay Crown Stealers {n}", "crown_stealer_kill_interval", "crown_stealer_kill_checks",
+                                (2, 3, 5, 10), 4, CAMPAIGN),
+    "nights": Milestone("Survive Nights {n}", "night_interval", "night_checks", (2, 3, 5, 10), 5, ISLAND),
+    "trees": Milestone("Fell Trees {n}", "tree_interval", "tree_checks", (5, 10, 20, 25), 6, ISLAND),
+    # Building sanity: new buildings on each island (not upgrades or rebuilds)
+    "walls": Milestone("Build Walls {n}", "wall_interval", "wall_checks", (1, 2, 3, 5), 7, ISLAND),
+    "towers": Milestone("Build Archer Towers {n}", "tower_interval", "tower_checks", (1, 2, 3, 5), 8, ISLAND),
+    "farms": Milestone("Build Farms {n}", "farm_interval", "farm_checks", (1,), 9, ISLAND),
+    "citizen_houses": Milestone("Build Citizen Houses {n}", "citizen_house_interval", "citizen_house_checks",
+                                (1, 2), 10, ISLAND),
     # Unit sanity (subjects given their tool or role)
-    "villagers": Milestone("Recruit {n} Villagers", "villager_interval", "villager_checks", (5, 10, 20, 25), 11),
-    "archers": Milestone("Recruit {n} Archers", "archer_interval", "archer_checks", (3, 5, 10, 20), 12),
-    "builders": Milestone("Recruit {n} Builders", "builder_interval", "builder_checks", (3, 5, 10), 13),
-    "farmers": Milestone("Recruit {n} Farmers", "farmer_interval", "farmer_checks", (2, 3, 5, 10), 14),
-    "knights": Milestone("Recruit {n} Knights", "knight_interval", "knight_checks", (1, 2, 3, 5), 15),
+    "villagers": Milestone("Recruit Villagers {n}", "villager_interval", "villager_checks", (5, 10, 20, 25), 11, ISLAND),
+    "archers": Milestone("Recruit Archers {n}", "archer_interval", "archer_checks", (3, 5, 10, 20), 12, ISLAND),
+    "builders": Milestone("Recruit Builders {n}", "builder_interval", "builder_checks", (3, 5, 10), 13, ISLAND),
+    "farmers": Milestone("Recruit Farmers {n}", "farmer_interval", "farmer_checks", (2, 3, 5, 10), 14, ISLAND),
+    "knights": Milestone("Recruit Knights {n}", "knight_interval", "knight_checks", (1, 2, 3, 5), 15, CAMPAIGN),
     # Animal sanity (killed by anyone)
-    "animals": Milestone("Hunt {n} Animals", "animal_interval", "animal_checks", (25, 50, 100, 200), 16),
-    "deer": Milestone("Hunt {n} Deer", "deer_interval", "deer_checks", (5, 10, 20, 50), 17),
-    "rabbits": Milestone("Hunt {n} Rabbits", "rabbit_interval", "rabbit_checks", (10, 25, 50, 100), 18),
-    "boars": Milestone("Hunt {n} Boars", "boar_interval", "boar_checks", (2, 5, 10, 20), 19),
+    "animals": Milestone("Hunt Animals {n}", "animal_interval", "animal_checks", (25, 50, 100, 200), 16, ISLAND),
+    "deer": Milestone("Hunt Deer {n}", "deer_interval", "deer_checks", (5, 10, 20, 50), 17, ISLAND),
+    "rabbits": Milestone("Hunt Rabbits {n}", "rabbit_interval", "rabbit_checks", (10, 25, 50, 100), 18, ISLAND),
+    "boars": Milestone("Hunt Boars {n}", "boar_interval", "boar_checks", (1, 2, 3), 19, CAMPAIGN),
     # Coins
-    "bribes": Milestone("Bribe the Greed with {n} Coins", "bribe_interval", "bribe_checks", (5, 10, 25, 50), 20),
-    "coins_spent": Milestone("Spend {n} Coins", "spend_interval", "spend_checks", (50, 100, 200, 500), 21),
+    "bribes": Milestone("Bribe Greed Coins {n}", "bribe_interval", "bribe_checks", (10, 25, 50, 100), 20, ISLAND),
+    "coins_spent": Milestone("Spend Coins {n}", "spend_interval", "spend_checks", (50, 100, 200, 500), 21, ISLAND),
+    "sunk_coins": Milestone("Sink Coins {n}", "sink_interval", "sink_checks", (10, 25, 50, 100), 23, ISLAND),
 }
 
-# Building sanity: buildings per island to liberate. The hardest Norselands difficulty guarantees about 48 wall
-# spots, 35 tower spots, 11 farm spots and 11 vagrant camps over its six islands; these stay under that
-# (40 / 30 / 10 / 10 for all six).
-BUILDING_RATES: dict[str, Fraction] = {
-    "walls": Fraction(20, 3),
-    "towers": Fraction(5),
-    "farms": Fraction(5, 3),
-    "citizen_houses": Fraction(5, 3),
-}
-
-# Call of Olympus has no "islands to liberate"; its milestone and building counts treat it as five islands.
+# Call of Olympus is one campaign-wide region: its per-island milestones are counted over the whole campaign, five
+# islands' worth, and building sanity and the caps below treat it as five islands too.
 OLYMPUS_GOAL_ISLANDS = 5
 
-# category -> (extra castle upgrades on top of the tier, minimum islands reachable). Kinds that need more islands
-# than the seed has are left out entirely: the rarer Greed (and boars) may never turn up on the first island.
+# Most an island is sure to give of these, so higher checks are left out: only so many trees, four knights unless
+# some die, and building spots: the hardest Norselands difficulty guarantees about 48 wall spots, 35 tower spots and
+# 11 farm spots over six islands, and every island has at least two vagrant camps.
+MILESTONE_CAPS_PER_ISLAND: dict[str, int] = {
+    "trees": 100, "knights": 4, "walls": 8, "towers": 5, "farms": 1, "citizen_houses": 2,
+}
+
+# category -> (extra castle upgrades on top of the tier, minimum islands in the seed). Kinds that need more islands
+# than the seed has are left out entirely: the rarer Greed (and boars) only turn up on the later islands.
 MILESTONE_REQUIREMENTS: dict[str, tuple[int, int]] = {
     "greed": (0, 1),
     "greedlings": (0, 1),
     "floaters": (1, 2),
+    "chargers": (1, 2),
+    "greed_knights": (1, 1),
     "breeders": (2, 3),
     "crown_stealers": (1, 2),
     "nights": (0, 1),
@@ -194,18 +205,14 @@ MILESTONE_REQUIREMENTS: dict[str, tuple[int, int]] = {
     "boars": (0, 2),
     "bribes": (0, 1),
     "coins_spent": (0, 1),
+    "sunk_coins": (-99, 1),
 }
 
 
-def milestone_name(category: str, threshold: int) -> str:
-    return MILESTONES[category].template.format(n=threshold)
-
-
-def goal_islands(world) -> int:
-    campaign = world.campaign
-    if campaign.is_campaign_wide:
-        return OLYMPUS_GOAL_ISLANDS
-    return min(world.options.islands_to_liberate.value, campaign.island_count)
+def milestone_name(category: str, threshold: int, island: int = 0) -> str:
+    """Island-counted milestones carry their island ("Island 3: Slay Greed 100"); island 0 = campaign-wide."""
+    name = MILESTONES[category].template.format(n=threshold)
+    return f"Island {island}: {name}" if island else name
 
 
 def available_islands(world) -> int:
@@ -235,11 +242,25 @@ def milestone_interval(world, category: str) -> int:
     return getattr(world.options, option).value if option else 1
 
 
-def milestone_per_island(world, category: str) -> Fraction:
-    """How many checks of this category each island to liberate adds."""
-    if category in BUILDING_RATES:
-        return BUILDING_RATES[category] if world.options.building_sanity else Fraction(0)
-    return Fraction(getattr(world.options, MILESTONES[category].count_option).value)
+def milestone_in_campaign(world, category: str) -> bool:
+    milestone, key = MILESTONES[category], world.campaign.key
+    return (not milestone.only or key in milestone.only) and key not in milestone.exclude
+
+
+def milestone_islands(world, category: str) -> list[int]:
+    """Islands this kind is counted on separately, or [0] when it's counted over the whole campaign."""
+    if MILESTONES[category].scope == ISLAND and not world.campaign.is_campaign_wide:
+        return list(world.islands_in_play)
+    return [0]
+
+
+def milestone_count(world, category: str) -> int:
+    """Checks of this kind (per island for island-counted kinds) before caps."""
+    milestone = MILESTONES[category]
+    count = getattr(world.options, milestone.count_option).value
+    if milestone.scope == ISLAND and world.campaign.is_campaign_wide:
+        count *= OLYMPUS_GOAL_ISLANDS
+    return count
 
 
 def _max_island_content() -> dict[int, IslandContent]:
@@ -292,23 +313,27 @@ def _all_location_names_to_ids() -> dict[str, int]:
     global_base = LOC_BASE + 10_000
     for level in CASTLE_LEVELS:
         table[castle_level_name(level)] = global_base + level
-    table[FULL_UPGRADE_LOCATION] = global_base + 100
     for i, name in enumerate(HERMIT_BUILDINGS.values()):
         table[name] = global_base + 300 + i
     table[GRASS_LOCATION] = global_base + 400
-    table[WATER_LOCATION] = global_base + 401
 
     for category, milestone in MILESTONES.items():
-        if category in BUILDING_RATES:
-            max_count = floor(BUILDING_RATES[category] * MAX_ISLANDS)
-        else:
-            max_count = MAX_MILESTONES_PER_ISLAND * MAX_ISLANDS
-        thresholds = {interval * i for interval in milestone.intervals for i in range(1, max_count + 1)}
-        for n in sorted(thresholds):
-            table[milestone_name(category, n)] = MILESTONE_BASE + milestone.id_slot * 100_000 + n
+        slot_base = MILESTONE_BASE + milestone.id_slot * 1_000_000
+        if milestone.scope == CAMPAIGN:
+            ranges = {0: MAX_CAMPAIGN_MILESTONE_CHECKS}
+        else:  # one set per numbered island, plus Olympus' campaign-wide version
+            ranges = {island: MAX_ISLAND_MILESTONE_CHECKS for island in range(1, MAX_ISLANDS + 1)}
+            ranges[0] = MAX_ISLAND_MILESTONE_CHECKS * OLYMPUS_GOAL_ISLANDS
+        for island, max_count in ranges.items():
+            thresholds = {interval * i for interval in milestone.intervals for i in range(1, max_count + 1)}
+            for n in sorted(thresholds):
+                name = milestone_name(category, n, island)
+                table[name] = slot_base + island * 100_000 + n
+                MILESTONE_NAMES.add(name)
     return table
 
 
+MILESTONE_NAMES: set[str] = set()
 LOCATION_NAME_TO_ID: dict[str, int] = _all_location_names_to_ids()
 
 LOCATION_NAME_GROUPS: dict[str, set[str]] = {
@@ -322,24 +347,32 @@ LOCATION_NAME_GROUPS["Gem Costs"] = {
     if any(f": {PROGRESSIVE_KINDS[kind][0]} " in name or name.startswith(f"{PROGRESSIVE_KINDS[kind][0]} ")
            for kind in GEM_KINDS)
 }
-LOCATION_NAME_GROUPS["Castle"] = {castle_level_name(level) for level in CASTLE_LEVELS} | {FULL_UPGRADE_LOCATION}
-LOCATION_NAME_GROUPS["Milestones"] = {
-    name for name in LOCATION_NAME_TO_ID
-    if name.startswith(("Slay ", "Survive ", "Fell ", "Build ", "Recruit ", "Hunt ", "Bribe ", "Spend "))
-    and ":" not in name and not name.startswith("Build the ")
-}
+LOCATION_NAME_GROUPS["Castle"] = {castle_level_name(level) for level in CASTLE_LEVELS}
+LOCATION_NAME_GROUPS["Milestones"] = set(MILESTONE_NAMES)
 LOCATION_NAME_GROUPS["Buildings"] = {
-    name for name in LOCATION_NAME_TO_ID if name.startswith(("Build ", "Hermit Building")) or ": Build the" in name
+    name for name in LOCATION_NAME_TO_ID if name.split(": ")[-1].startswith(("Build ", "Hermit Building"))
 }
+for _category, _milestone in MILESTONES.items():
+    _kind = _milestone.template.replace(" {n}", "")
+    LOCATION_NAME_GROUPS[_kind] = {
+        name for name in MILESTONE_NAMES if name.split(": ")[-1].rsplit(" ", 1)[0] == _kind
+    }
 LOCATION_NAME_GROUPS["Powers"] = {name for name in LOCATION_NAME_TO_ID if "Puzzle" in name or "'s Quest" in name}
 
 
 def milestone_thresholds(world, category: str) -> list[int]:
-    if MILESTONE_REQUIREMENTS[category][1] > available_islands(world):
+    """Thresholds of this kind (the same on every island for island-counted kinds)."""
+    if not milestone_in_campaign(world, category):
+        return []
+    islands = available_islands(world)
+    if MILESTONE_REQUIREMENTS[category][1] > islands:
         return []
     interval = milestone_interval(world, category)
-    count = floor(milestone_per_island(world, category) * goal_islands(world))
-    return [interval * i for i in range(1, count + 1)]
+    thresholds = [interval * i for i in range(1, milestone_count(world, category) + 1)]
+    if category in MILESTONE_CAPS_PER_ISLAND:
+        per = 1 if milestone_islands(world, category) != [0] else islands
+        thresholds = [n for n in thresholds if n <= MILESTONE_CAPS_PER_ISLAND[category] * per]
+    return thresholds
 
 
 def _add(world, region_name: str, name: str) -> None:
@@ -384,15 +417,15 @@ def create_all_locations(world) -> None:
 
     for level in CASTLE_LEVELS:
         _add(world, world.home_region, castle_level_name(level))
-    _add(world, world.home_region, FULL_UPGRADE_LOCATION)
     if world.options.hermit_building_checks:
         for hermit in hermits_in_play(world):
             _add(world, world.home_region, HERMIT_BUILDINGS[hermit])
     if world.options.grass_check:
         _add(world, world.home_region, GRASS_LOCATION)
-    if world.options.sunk_coins_check:
-        _add(world, world.home_region, WATER_LOCATION)
 
     for category in MILESTONES:
-        for threshold in milestone_thresholds(world, category):
-            _add(world, world.home_region, milestone_name(category, threshold))
+        thresholds = milestone_thresholds(world, category)
+        for island in milestone_islands(world, category):
+            region = f"Island {island}" if island else world.home_region
+            for threshold in thresholds:
+                _add(world, region, milestone_name(category, threshold, island))

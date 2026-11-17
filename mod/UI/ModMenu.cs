@@ -37,7 +37,6 @@ public class ModMenu : MonoBehaviour
     private bool _chatAutoScroll = true;
     private bool _chatOnlyMine;
     private Rect _rect;
-    private bool _resizing;
     private bool _showPassword;
     private string _toast = "";
     private float _toastUntil;
@@ -94,17 +93,18 @@ public class ModMenu : MonoBehaviour
             ClientSettings.Save();
         }
 
-        UpdateWindowDrag();
         _drawThisFrame = _visible && NeedsDraw();
     }
 
     // --- Drawing on demand ---
     // Drawing the menu every frame through IMGUI made a steady stream of game-side garbage, and this game runs
     // without incremental GC, so the collections froze it several times a second. Instead the menu is drawn into a
-    // picture (see UiBlocker) whenever something could have changed: while the mouse moves or a button is held, on
-    // any key or scroll, while typing, and otherwise a few times a second to keep counters fresh.
+    // picture (see UiBlocker) whenever something could have changed: on any input event (see OnGUI), while a
+    // control is held, while typing, and otherwise a few times a second to keep counters fresh.
     private const float IdleRedrawSeconds = 0.25f;
-    private bool _drawThisFrame;
+    private bool _drawThisFrame;   // from Update: mouse moved, typing, a key, a refresh due...
+    private bool _drawPass;        // decided on each Layout pass, used by the event pass that follows it
+    private bool _drawRequested;   // an input event was handled; this frame's picture has to show the result
     private bool _forceDraw;
     private float _nextDraw;
     private Vector3 _lastMouse;
@@ -118,33 +118,37 @@ public class ModMenu : MonoBehaviour
         bool draw = _forceDraw || moved
             || Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1)
             || Input.mouseScrollDelta.sqrMagnitude > 0f || Input.anyKeyDown || TextInput.AnyFocused
-            || _resizing || _draggingWindow || _draggingScale || Time.unscaledTime >= _nextDraw;
+            || _draggingScale || Time.unscaledTime >= _nextDraw;
         _forceDraw = false;
         return draw;
     }
 
-    // --- Moving the window by its header ---
-    private bool _draggingWindow;
-    private Vector2 _dragStartMouse, _dragStartPos;
+    // --- Moving the window by its header, resizing it by the grip ---
+    // Both run on IMGUI's own mouse events and hold GUIUtility.hotControl while the button is down, which also keeps
+    // the menu redrawing every frame until it's let go.
+    private Vector2 _grab;
+    private Vector2 _sizeAtGrab;
 
-    private void BeginWindowDrag()
+    private void HandleWindowDrag(int id, Rect header)
     {
-        _draggingWindow = true;
-        _dragStartMouse = Input.mousePosition;
-        _dragStartPos = new Vector2(_rect.x, _rect.y);
-    }
-
-    private void UpdateWindowDrag()
-    {
-        if (!_draggingWindow) return;
-        float scale = Mathf.Clamp(ClientSettings.Current.WindowScale, 0.5f, 2.5f);
-        Vector2 mouse = Input.mousePosition;
-        _rect.x = _dragStartPos.x + (mouse.x - _dragStartMouse.x) / scale;
-        _rect.y = _dragStartPos.y - (mouse.y - _dragStartMouse.y) / scale; // screen y grows upwards, GUI y downwards
-        if (!Input.GetMouseButton(0))
+        var e = Event.current;
+        switch (e.type)
         {
-            _draggingWindow = false;
-            SaveWindow();
+            case EventType.MouseDown when e.button == 0 && header.Contains(e.mousePosition):
+                GUIUtility.hotControl = id;
+                _grab = e.mousePosition; // window-local, so it stays put under the cursor
+                e.Use();
+                break;
+            case EventType.MouseDrag when GUIUtility.hotControl == id:
+                _rect.x += e.mousePosition.x - _grab.x;
+                _rect.y += e.mousePosition.y - _grab.y;
+                e.Use();
+                break;
+            case EventType.MouseUp when GUIUtility.hotControl == id:
+                GUIUtility.hotControl = 0;
+                SaveWindow();
+                e.Use();
+                break;
         }
     }
 
@@ -173,12 +177,23 @@ public class ModMenu : MonoBehaviour
     private void OnGUI()
     {
         Styles.Build();
-        var type = Event.current.type;
+        var e = Event.current;
+        var type = e.type;
 
         if (_visible && type == EventType.MouseDown) TextInput.ClearFocus(); // clicking a box re-focuses it
 
         Feed.Draw();
-        if (!_visible || !_drawThisFrame) return; // between redraws the last picture stays on screen
+        if (!_visible) return;
+
+        // IMGUI calls OnGUI twice per event, a Layout pass and then the event itself, and GUILayout needs both or
+        // neither. So the choice is made on the Layout pass, which still carries the event's details: always draw
+        // for input (a click, drag, scroll or key), while a control is held down, and otherwise only when the
+        // picture is due. Between redraws the last picture stays on screen.
+        if (type == EventType.Layout)
+            _drawPass = _drawThisFrame || _drawRequested || GUIUtility.hotControl != 0 || CarriesInput(e)
+                || Time.unscaledTime >= _nextDraw || !UiBlocker.CanCapture;
+        if (!_drawPass) return;
+        if (type != EventType.Layout && type != EventType.Repaint) _drawRequested = true;
 
         var s = ClientSettings.Current;
         float scale = Mathf.Clamp(s.WindowScale, 0.5f, 2.5f);
@@ -209,23 +224,23 @@ public class ModMenu : MonoBehaviour
 
         if (repaint)
         {
+            _drawRequested = false;
             _nextDraw = Time.unscaledTime + IdleRedrawSeconds;
             // Keep the game's own UI (e.g. the pause menu) from taking clicks meant for this window.
             UiBlocker.Cover(new Rect(_rect.x * scale, _rect.y * scale, _rect.width * scale, _rect.height * scale));
         }
     }
 
+    // A real input event, not a repaint: on the Layout pass these details are still the upcoming event's.
+    private static bool CarriesInput(Event e) =>
+        e.clickCount > 0 || e.button != 0 || e.delta.sqrMagnitude > 0f || e.keyCode != KeyCode.None || e.character != '\0';
+
     private void DrawWindow()
     {
         GUILayout.BeginArea(_rect, Styles.Window);
         try
         {
-            var e = Event.current;
-            if (e.type == EventType.MouseDown && e.button == 0 && new Rect(0f, 0f, _rect.width, HeaderHeight).Contains(e.mousePosition))
-            {
-                BeginWindowDrag();
-                e.Use();
-            }
+            HandleWindowDrag(GUIUtility.GetControlID(FocusType.Passive), new Rect(0f, 0f, _rect.width, HeaderHeight));
 
             Gui.BeginVertical();
 
@@ -294,21 +309,26 @@ public class ModMenu : MonoBehaviour
 
     private void HandleResize(Rect grip)
     {
+        int id = GUIUtility.GetControlID(FocusType.Passive);
         var e = Event.current;
-        if (e.type == EventType.MouseDown && grip.Contains(e.mousePosition))
+        switch (e.type)
         {
-            _resizing = true;
-            e.Use();
-        }
-        else if (e.type == EventType.MouseUp && _resizing)
-        {
-            _resizing = false;
-            SaveWindow();
-        }
-        if (_resizing && e.type == EventType.MouseDrag)
-        {
-            _rect.width = Mathf.Max(520f, _rect.width + e.delta.x);
-            _rect.height = Mathf.Max(380f, _rect.height + e.delta.y);
+            case EventType.MouseDown when e.button == 0 && grip.Contains(e.mousePosition):
+                GUIUtility.hotControl = id;
+                _grab = e.mousePosition; // the window's top-left doesn't move while resizing
+                _sizeAtGrab = new Vector2(_rect.width, _rect.height);
+                e.Use();
+                break;
+            case EventType.MouseDrag when GUIUtility.hotControl == id:
+                _rect.width = Mathf.Max(520f, _sizeAtGrab.x + e.mousePosition.x - _grab.x);
+                _rect.height = Mathf.Max(380f, _sizeAtGrab.y + e.mousePosition.y - _grab.y);
+                e.Use();
+                break;
+            case EventType.MouseUp when GUIUtility.hotControl == id:
+                GUIUtility.hotControl = 0;
+                SaveWindow();
+                e.Use();
+                break;
         }
     }
 
@@ -336,6 +356,11 @@ public class ModMenu : MonoBehaviour
     }
 
     // ---------------------------------------------------------------- widgets
+
+    // Sort key that compares the numbers inside names as numbers: digits are zero-padded to a fixed width.
+    private static string NaturalKey(string name) => Digits.Replace(name, PadNumber);
+    private static readonly System.Text.RegularExpressions.Regex Digits = new(@"\d+");
+    private static string PadNumber(System.Text.RegularExpressions.Match match) => match.Value.PadLeft(8, '0');
 
     // Long lists are shown a page at a time: drawing hundreds of rows every frame is what makes IMGUI slow.
     private const int PageSize = 25;
@@ -377,7 +402,7 @@ public class ModMenu : MonoBehaviour
         new (string, Action)[]
         {
             ("+1 Night", () => CheckTracker.AddMilestone(GameData.Milestone.Nights)),
-            ("Die (nights to 0)", CheckTracker.OnDeath),
+            ("+1 Charger", () => CheckTracker.OnEnemyKilled(EnemyType.Crusher)),
             ("+5 Trees", () => CheckTracker.AddMilestone(GameData.Milestone.Trees, 5)),
             ("DeathLink", ItemHandler.DebugDeathLink),
         },
@@ -418,6 +443,7 @@ public class ModMenu : MonoBehaviour
         },
         new (string, Action)[]
         {
+            ("+1 Greed Knight", () => CheckTracker.OnEnemyKilled(EnemyType.Knight)),
             ("Quarry built", () => CheckTracker.OnTechBuilding(TechnologyAge.Stone)),
             ("Mine built", () => CheckTracker.OnTechBuilding(TechnologyAge.Iron)),
         },
@@ -608,7 +634,9 @@ public class ModMenu : MonoBehaviour
             string inSeed = AP.Slot.IslandsLimited ? $"   <color={Styles.HexDim}>(this seed uses islands 1-{AP.Slot.IslandsInPlay})</color>" : "";
             Row("Islands", (AP.Slot.UsesIslandUnlocks ? islands : "Open in order") + inSeed);
         }
-        foreach (var group in GameData.ItemGroupsFor(campaign).Where(g => g.Title is "Statues" or "Hermits" or "Mounts" or "Powers"))
+        if (AP.Slot.ProgressiveSacks > 0)
+            Row("Coin sacks", $"{Gating.SacksReceived} / {AP.Slot.ProgressiveSacks}   <color={Styles.HexDim}>(your sack holds {Gating.PurseScale:0.##}x the usual)</color>");
+        foreach (var group in GameData.ItemGroupsFor(AP.Slot).Where(g => g.Title is "Bombs" or "Statues" or "Hermits" or "Mounts" or "Powers" || g.Title == "Sack" && AP.Slot.ProgressiveSacks == 0))
         {
             Gui.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
@@ -645,7 +673,7 @@ public class ModMenu : MonoBehaviour
         if (!AP.Connected) return new List<string>();
         if (_missingCacheChecked != AP.CheckedCount || Time.unscaledTime - _missingCacheTime > 3f)
         {
-            _missingCache = AP.MissingLocationNames().OrderBy(n => n).ToList();
+            _missingCache = AP.MissingLocationNames().OrderBy(NaturalKey, StringComparer.Ordinal).ToList();
             _missingCacheChecked = AP.CheckedCount;
             _missingCacheTime = Time.unscaledTime;
         }
@@ -664,20 +692,22 @@ public class ModMenu : MonoBehaviour
             Row("Waiting to send", $"<color={Styles.HexGold}>{AP.State.PendingLocations.Count} (will send on reconnect)</color>");
         EndCard();
 
-        BeginCard("MILESTONES");
+        BeginCard(island > 0 && !AP.Slot.Campaign.CampaignWide ? $"MILESTONES (ISLAND {island} AND CAMPAIGN-WIDE)" : "MILESTONES");
         foreach (var milestone in AP.Slot.Milestones.Keys)
         {
             var (interval, count) = AP.Slot.Milestones[milestone];
             if (count == 0) continue;
+            bool perIsland = AP.Slot.IsPerIsland(milestone);
+            if (perIsland && island <= 0) continue;
             int value = CheckTracker.MilestoneCount(milestone);
             var next = CheckTracker.NextMilestone(milestone);
+            var scope = perIsland ? $"on island {island}" : "campaign";
             var nextText = next.HasValue
-                ? $"next check at {next.Value}  <color={Styles.HexDim}>(every {interval}, {count} checks)</color>"
-                : $"<color={Styles.HexGood}>all {count} done</color>";
+                ? $"next check at {next.Value}  <color={Styles.HexDim}>(every {interval}, {count} checks, {scope})</color>"
+                : $"<color={Styles.HexGood}>all {count} done</color>  <color={Styles.HexDim}>({scope})</color>";
             Row(GameData.Milestones[milestone].Label, $"<b>{value}</b>   {nextText}");
         }
         OneOffRow("Grass eaten", CheckTracker.GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
-        OneOffRow("Coins sunk", CheckTracker.SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
         EndCard();
 
         var campaign = AP.Slot.Campaign;
@@ -727,8 +757,7 @@ public class ModMenu : MonoBehaviour
         {
             var name = missing[i];
             Gui.BeginHorizontal();
-            Gui.Label(AP.Escape(name), Styles.Small);
-            GUILayout.FlexibleSpace();
+            Gui.Label(AP.Escape(name), Styles.Small, Gui.ExpandWidth);
             if (Gui.Button("Hint", Styles.ButtonSmall, Gui.Width(50f))) RequestHint(name, location: true);
             GUILayout.EndHorizontal();
         }
@@ -889,7 +918,7 @@ public class ModMenu : MonoBehaviour
         EndCard();
 
         BeginCard("GIVE ITEM");
-        foreach (var group in GameData.ItemGroupsFor(AP.Slot.Campaign))
+        foreach (var group in GameData.ItemGroupsFor(AP.Slot))
         {
             Gui.Label(group.Title, Styles.Dim);
             for (int i = 0; i < group.Names.Length; i += 3)
@@ -939,8 +968,7 @@ public class ModMenu : MonoBehaviour
             foreach (var name in missing.Skip(firstMissing).Take(PageSize))
             {
                 Gui.BeginHorizontal();
-                Gui.Label(AP.Escape(name), Styles.Small);
-                GUILayout.FlexibleSpace();
+                Gui.Label(AP.Escape(name), Styles.Small, Gui.ExpandWidth);
                 if (ConfirmButton("Send", "send:" + name, Styles.ButtonSmall, Gui.Width(70f))) AP.SendLocation(name);
                 GUILayout.EndHorizontal();
             }
@@ -991,7 +1019,13 @@ public class ModMenu : MonoBehaviour
             }
             Row("Wave offset here", $"+{AP.State.WaveOffset(GameAccess.CurrentIsland)} days");
             Row("Gating", $"{(Gating.Active ? "active" : "off")}, islands {(Gating.IslandGatingActive ? "gated" : "open")}");
-            if (GameAccess.CastleLevel >= 7) Row("Full upgrade", CheckTracker.FullUpgradeStatus().Detail);
+            if (!AP.Slot.Campaign.CampaignWide && AP.Slot.BombUnlocks)
+                Row("Bombs here", Gating.BombsAllowedHere() ? "allowed" : "blocked (need this island's bombs)");
+            var wallet = GameAccess.Player?.wallet;
+            if (wallet != null)
+                Row("Purse", $"{wallet.Coins} coins, {wallet.Gems} gems; sack holds {Gating.PurseScale:0.##}x (coins drawn at {Gating.CoinSize:0.##}x size)");
+            if (AP.Slot.Campaign.CampaignWide)
+                Row("Hermes's sack", Gating.HermesSackAllowed() ? "can be bought" : "blocked");
         }
         catch (Exception e)
         {

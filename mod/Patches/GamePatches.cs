@@ -10,8 +10,6 @@ internal static class GameLosePatch
 {
     private static void Prefix()
     {
-        try { CheckTracker.OnDeath(); }
-        catch (Exception e) { Plugin.Log.LogError($"[AP] Lose patch (nights): {e}"); }
         try
         {
             // Don't echo a death that a received DeathLink just caused.
@@ -19,6 +17,17 @@ internal static class GameLosePatch
             AP.SendDeathLink($"{AP.SlotName} lost their crown to the Greed.");
         }
         catch (Exception e) { Plugin.Log.LogError($"[AP] Lose patch: {e}"); }
+    }
+}
+
+// Progressive Coin Sacks: a coin entering the sack takes the sack's current size (see Gating).
+[HarmonyPatch(typeof(CurrencyBag), nameof(CurrencyBag.SpawnCurrency))]
+internal static class SackCoinSizePatch
+{
+    private static void Postfix(CurrencyBag __instance)
+    {
+        try { Gating.OnCoinEnteredSack(__instance); }
+        catch (Exception e) { Plugin.Log.LogDebug($"[AP] Sack coin size: {e.Message}"); }
     }
 }
 
@@ -97,28 +106,9 @@ internal static class MapLandUnlockedPatch
     }
 }
 
-[HarmonyPatch(typeof(Game), nameof(Game.SailAway))]
-internal static class SailAwayPatch
-{
-    // Make sure islands unlocked by items are reachable on the map even if the base game wouldn't have
-    // unlocked them yet.
-    private static void Prefix()
-    {
-        try
-        {
-            if (!Gating.IslandGatingActive || !AP.Slot.UsesIslandUnlocks) return;
-            var campaign = CampaignSaveData.current;
-            if (campaign == null) return;
-            int wanted = GameAccess.IslandToLand(Gating.HighestUnlockedIsland());
-            if (campaign.furthestUnlockedLand < wanted)
-            {
-                Plugin.Log.LogInfo($"[AP] furthestUnlockedLand {campaign.furthestUnlockedLand} -> {wanted}");
-                campaign.furthestUnlockedLand = wanted;
-            }
-        }
-        catch (Exception e) { Plugin.Log.LogError($"[AP] Sail away patch: {e}"); }
-    }
-}
+// Game.SailAway must never be patched: it takes an Il2CppSystem.Nullable<int>, which the IL2CPP-to-managed
+// trampoline can't pass, so the game crashed the moment you boarded. Putting unlocked islands on the sailing map
+// is done by Gating.ApplySailingMap instead.
 
 // Safety net: if the game still tries to sail somewhere locked, go to the nearest unlocked island instead.
 [HarmonyPatch(typeof(Game), nameof(Game.SetCurrentLand))]

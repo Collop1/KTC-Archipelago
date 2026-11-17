@@ -10,7 +10,8 @@ namespace APKingdom2Crown;
 //  - Per-island things (portals, chests, statues, shrines, hermit cabins) are progressive: the next
 //    unchecked "Island N: <thing> k" is sent. Each physical object is remembered by its x position so
 //    the same chest/portal can never count twice.
-//  - Milestones (kills, nights, trees) are counters saved in ModState.
+//  - Milestones (kills, nights, trees, ...) are counters saved in ModState. Everyday ones are counted per island
+//    ("Island 3: Slay Greed 100" only counts what happens on island 3), the rarer ones over the whole campaign.
 //  - Castle level, arrival, liberation, Norselands puzzles, Olympus quests and the goal are polled.
 //  Call of Olympus scatters its content randomly, so there the same things are counted campaign-wide.
 internal static class CheckTracker
@@ -19,7 +20,6 @@ internal static class CheckTracker
     private const float SamePositionTolerance = 1.5f;
 
     private static float _nextPoll;
-    private static float _nextFullUpgradePoll;
     private static bool? _wasDaytime;
     private static int _dayIsland;
     // Trees a builder has worked on, by address and when. Trees also collapse for reasons that aren't the
@@ -85,26 +85,42 @@ internal static class CheckTracker
 
     // --- Milestones ---
 
-    public static int MilestoneCount(GameData.Milestone milestone) => AP.State.Counter(milestone.ToString());
+    // The island a milestone counts on right now: the current island for island-counted kinds, 0 for campaign-wide
+    // ones, -1 when it's island-counted but the island isn't known.
+    public static int MilestoneIsland(GameData.Milestone milestone)
+    {
+        if (!AP.Slot.IsPerIsland(milestone)) return 0;
+        int island = GameAccess.CurrentIsland;
+        return island > 0 ? island : -1;
+    }
+
+    private static string CounterKey(GameData.Milestone milestone, int island) =>
+        island > 0 ? $"{milestone}@{island}" : milestone.ToString();
+
+    public static int MilestoneCount(GameData.Milestone milestone, int island) => AP.State.Counter(CounterKey(milestone, island));
+
+    public static int MilestoneCount(GameData.Milestone milestone) => MilestoneCount(milestone, Math.Max(0, MilestoneIsland(milestone)));
 
     public static void AddMilestone(GameData.Milestone milestone, int amount = 1)
     {
         if (!Tracking) return;
-        int value = AP.State.AddCounter(milestone.ToString(), amount);
-        SendReachedMilestones(milestone, value);
+        int island = MilestoneIsland(milestone);
+        if (island < 0) return;
+        int value = AP.State.AddCounter(CounterKey(milestone, island), amount);
+        SendReachedMilestones(milestone, value, island);
     }
 
-    private static void SendReachedMilestones(GameData.Milestone milestone, int value)
+    private static void SendReachedMilestones(GameData.Milestone milestone, int value, int island)
     {
         var (interval, count) = AP.Slot.Milestones[milestone];
         for (int i = 1; i <= count && interval * i <= value; i++)
         {
-            var name = GameData.MilestoneLocation(milestone, interval * i);
+            var name = GameData.MilestoneLocation(milestone, interval * i, island);
             if (!AP.IsChecked(name)) AP.SendLocation(name);
         }
     }
 
-    // Next threshold to reach, or null once every milestone check of this kind is done.
+    // Next threshold to reach (on the current island for island-counted kinds), or null once they're all done.
     public static int? NextMilestone(GameData.Milestone milestone)
     {
         var (interval, count) = AP.Slot.Milestones[milestone];
@@ -147,15 +163,21 @@ internal static class CheckTracker
     public static void ResendEarned()
     {
         foreach (var milestone in AP.Slot.Milestones.Keys)
-            SendReachedMilestones(milestone, MilestoneCount(milestone));
+        {
+            if (!AP.Slot.IsPerIsland(milestone))
+            {
+                SendReachedMilestones(milestone, MilestoneCount(milestone, 0), 0);
+                continue;
+            }
+            for (int island = 1; island <= AP.Slot.IslandsInPlay; island++)
+                SendReachedMilestones(milestone, MilestoneCount(milestone, island), island);
+        }
         SendCounterCheck(GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
-        SendCounterCheck(SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
     }
 
     // --- One-off checks ---
 
     public const string GrassCounter = "Grass";
-    public const string SunkCoinsCounter = "SunkCoins";
 
     private static void SendCounterCheck(string counter, int target, string location)
     {
@@ -169,13 +191,7 @@ internal static class CheckTracker
         SendCounterCheck(GrassCounter, GameData.GrassTarget, GameData.GrassLocation);
     }
 
-    public static void OnCoinSunk()
-    {
-        if (!Tracking) return;
-        int sunk = AP.State.AddCounter(SunkCoinsCounter, 1);
-        if (sunk == GameData.SunkCoinsTarget) Feed.Add("<color=#6D8BE8>The sea has claimed 25 of your coins.</color>");
-        SendCounterCheck(SunkCoinsCounter, GameData.SunkCoinsTarget, GameData.SunkCoinsLocation);
-    }
+    public static void OnCoinSunk() => AddMilestone(GameData.Milestone.SunkCoins);
 
     public static void OnTechBuilding(TechnologyAge age)
     {
@@ -206,8 +222,13 @@ internal static class CheckTracker
     }
 
     // --- Building sanity ---
-    // Buildings are noticed by polling: a wall, tower, farm or citizen house at a new x position on this island
-    // counts once. Whatever already stood the first time an island was looked at doesn't count.
+    // Buildings are noticed by polling: a *built* wall, tower, farm or citizen house at a new x position on this
+    // island counts once. Whatever already stood the first time an island was looked at doesn't count, and nor do
+    // upgrades or rebuilding where one stood before.
+    //  - Walls and citizen houses only exist once built.
+    //  - Tower spots always exist (level 0 = unbuilt, 3+ = built), so a tower counts when its spot gets a level.
+    //  - Farms are the Farmhouse building (the stable hermit's stable is one too, so it's left out), not the field
+    //    plots around it, which multiply as the farm grows.
 
     private static float _nextBuildingPoll;
 
@@ -217,10 +238,14 @@ internal static class CheckTracker
         _nextBuildingPoll = Time.unscaledTime + 2f;
         int land = GameAccess.CurrentLand;
         if (land < 0) return;
-        CountBuildings(GameData.Milestone.Walls, land, Object.FindObjectsByType<Wall>(FindObjectsSortMode.None).Where(w => w != null && w.gameObject.activeInHierarchy).Select(w => w.transform.position.x));
-        CountBuildings(GameData.Milestone.Towers, land, Object.FindObjectsByType<Tower>(FindObjectsSortMode.None).Where(t => t != null && t.gameObject.activeInHierarchy).Select(t => t.transform.position.x));
-        CountBuildings(GameData.Milestone.Farms, land, Object.FindObjectsByType<Farmland>(FindObjectsSortMode.None).Where(f => f != null && f.gameObject.activeInHierarchy).Select(f => f.transform.position.x));
-        CountBuildings(GameData.Milestone.CitizenHouses, land, Object.FindObjectsByType<CitizenHousePayable>(FindObjectsSortMode.None).Where(c => c != null && c.gameObject.activeInHierarchy).Select(c => c.transform.position.x));
+        CountBuildings(GameData.Milestone.Walls, land, Object.FindObjectsByType<Wall>(FindObjectsSortMode.None)
+            .Where(w => w != null && w.gameObject.activeInHierarchy).Select(w => w.transform.position.x));
+        CountBuildings(GameData.Milestone.Towers, land, Object.FindObjectsByType<Tower>(FindObjectsSortMode.None)
+            .Where(t => t != null && t.gameObject.activeInHierarchy && t.level > 0).Select(t => t.transform.position.x));
+        CountBuildings(GameData.Milestone.Farms, land, Object.FindObjectsByType<Farmhouse>(FindObjectsSortMode.None)
+            .Where(f => f != null && f.gameObject.activeInHierarchy && !f.isStable && f.level > 0).Select(f => f.transform.position.x));
+        CountBuildings(GameData.Milestone.CitizenHouses, land, Object.FindObjectsByType<CitizenHousePayable>(FindObjectsSortMode.None)
+            .Where(c => c != null && c.gameObject.activeInHierarchy).Select(c => c.transform.position.x));
     }
 
     private static void CountBuildings(GameData.Milestone kind, int land, IEnumerable<float> positions)
@@ -261,12 +286,6 @@ internal static class CheckTracker
         try { PollQuests(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollQuests: {e.Message}"); }
         try { PollBuildings(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollBuildings: {e.Message}"); }
         try { StolenGems.Poll(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] StolenGems: {e.Message}"); }
-
-        if (Time.unscaledTime >= _nextFullUpgradePoll)
-        {
-            _nextFullUpgradePoll = Time.unscaledTime + 5f;
-            try { PollFullUpgrade(); } catch (Exception e) { Plugin.Log.LogDebug($"[AP] PollFullUpgrade: {e.Message}"); }
-        }
     }
 
     private static void PollNights()
@@ -279,24 +298,12 @@ internal static class CheckTracker
         {
             AddMilestone(GameData.Milestone.Nights);
             int nights = MilestoneCount(GameData.Milestone.Nights);
-            Feed.Add($"<color=#FFD27F>Dawn breaks. Nights survived: {nights}</color>");
+            var where = AP.Slot.IsPerIsland(GameData.Milestone.Nights) && island > 0 ? $" on Island {island}" : "";
+            Feed.Add($"<color=#FFD27F>Dawn breaks. Nights survived{where}: {nights}</color>");
             StolenGems.OnNightSurvived();
         }
         _wasDaytime = day;
         _dayIsland = island;
-    }
-
-    // Losing your crown ends your reign: the nights-survived count starts again from zero. Checks already sent stay
-    // sent; the next one needs that many nights in a row.
-    public static void OnDeath()
-    {
-        if (!Tracking) return;
-        int nights = MilestoneCount(GameData.Milestone.Nights);
-        if (nights == 0) return;
-        AP.State.Counters[GameData.Milestone.Nights.ToString()] = 0;
-        AP.State.Dirty = true;
-        Feed.Add($"<color=#FA8072>Your reign has ended. Nights survived reset to 0 (was {nights}).</color>");
-        Plugin.Log.LogInfo($"[AP] Died: nights survived reset from {nights}");
     }
 
     private static void PollIsland()
@@ -394,41 +401,5 @@ internal static class CheckTracker
             AP.SendLocation(name);
             if (name == GameData.OlympusGoalLocation && AP.Connected) AP.ReportGoal();
         }
-    }
-
-    // An island is fully upgraded once the castle is at its last level and no built wall or tower can be
-    // upgraded any further.
-    public static (bool Done, string Detail) FullUpgradeStatus()
-    {
-        var kingdom = GameAccess.Kingdom;
-        if (kingdom == null) return (false, "no kingdom");
-        int castle = GameAccess.CastleLevel;
-        int walls = 0, wallsLeft = 0, towers = 0, towersLeft = 0;
-        foreach (var wall in Object.FindObjectsByType<Wall>(FindObjectsSortMode.None))
-        {
-            if (wall == null || !wall.gameObject.activeInHierarchy) continue;
-            walls++;
-            var upgrade = wall.GetComponent<PayableUpgrade>();
-            if (upgrade != null && upgrade.HasUpgrade()) wallsLeft++;
-        }
-        foreach (var tower in Object.FindObjectsByType<Tower>(FindObjectsSortMode.None))
-        {
-            if (tower == null || !tower.gameObject.activeInHierarchy) continue;
-            towers++;
-            var upgrade = tower.GetComponent<PayableUpgrade>();
-            if (upgrade != null && upgrade.HasUpgrade()) towersLeft++;
-        }
-        bool done = castle >= 7 && walls >= 2 && wallsLeft == 0 && towersLeft == 0;
-        return (done, $"castle {castle}/7, walls upgradeable {wallsLeft}/{walls}, towers upgradeable {towersLeft}/{towers}");
-    }
-
-    private static void PollFullUpgrade()
-    {
-        if (AP.IsChecked(GameData.FullUpgradeLocation)) return;
-        if (GameAccess.CastleLevel < 7) return;
-        var (done, detail) = FullUpgradeStatus();
-        if (!done) return;
-        Plugin.Log.LogInfo($"[AP] Island fully upgraded: {detail}");
-        AP.SendLocation(GameData.FullUpgradeLocation);
     }
 }

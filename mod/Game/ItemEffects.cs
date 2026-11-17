@@ -35,16 +35,89 @@ internal static class ItemEffects
     {
         var flavour = itemName switch
         {
-            "Sunken Gold (Junk)" => "It's covered in seaweed and worth nothing.",
+            GameData.SunkenGold => "It's covered in seaweed and worth nothing.",
             "Broken Crown (Junk)" => "Someone else's bad night. Not yours. Yet.",
-            "Tuft of Grass (Junk)" => "Your steed looks interested. You are not.",
-            "Greed Mask Shard (Junk)" => "It's still warm.",
+            GameData.GreedMaskShard => "It's still warm.",
             "Soggy Bread (Junk)" => "Even the vagrants won't touch it.",
             "Bent Arrow (Junk)" => "Your archers politely decline.",
             "Lost Banner (Junk)" => "It belongs to a kingdom long gone.",
+            "Rusty Hammer (Junk)" => "Your builders have standards.",
+            "Moth-Eaten Cloak (Junk)" => "It was regal once. Now it's mostly holes.",
+            "Cracked Gem (Junk)" => "The statues won't take it. They checked.",
+            "Hermit's Old Sock (Junk)" => "It smells of decades of solitude.",
+            "Rabbit's Foot (Junk)" => "Not so lucky for the rabbit. Or for you.",
+            "Boat Plank (Junk)" => "One down, a whole boat to go.",
+            "Banker's IOU (Junk)" => "Payable in full, never.",
+            "Squashed Berry (Junk)" => "The farmers wince.",
+            "Tangled Fishing Line (Junk)" => "The fish got away with the hook.",
+            "Chewed Stick (Junk)" => "A good dog was here.",
             _ => "It does nothing.",
         };
         Feed.Add($"<color=#AAAAAA>{AP.Escape(itemName)}: {flavour}</color>");
+    }
+
+    // Tuft of Grass: your mount eats it wherever you are (snow, forest, daytime) and is fully rested and well fed.
+    public static void FeedSteed()
+    {
+        var steed = GameAccess.Player?.steed;
+        if (steed == null)
+        {
+            Feed.Add("<color=#AAAAAA>Tuft of Grass: you're on foot, so you keep it for later. It wilts.</color>");
+            return;
+        }
+        steed.Stamina = 1f;
+        try { steed.WellFedTimer = Math.Max(steed.WellFedTimer, steed.wellFedDuration); }
+        catch (Exception e) { Plugin.Log.LogDebug($"[AP] Well fed: {e.Message}"); }
+        Feed.Add("<color=#8FD16A>Tuft of Grass: your mount munches it happily and is fully rested.</color>");
+    }
+
+    // Coins spawned by Sunken Gold: DropInWaterPatch leaves these out of the Sink Coins count.
+    public static readonly HashSet<IntPtr> SunkenGoldCoins = new();
+
+    // Sunken Gold: a coin pops out of your purse and sinks out of reach. Worth nothing, as promised.
+    public static void SunkenGold()
+    {
+        Junk(GameData.SunkenGold);
+        var player = GameAccess.Player;
+        if (player == null) return;
+        try
+        {
+            var coin = CurrencyManagerExt.SpawnCurrency(CurrencyType.Coins, player.transform.position + Vector3.up * 1.5f, Quaternion.identity, null);
+            var droppable = coin == null ? null : coin.GetComponent<Droppable>();
+            if (droppable == null) return;
+            if (SunkenGoldCoins.Count > 64) SunkenGoldCoins.Clear();
+            SunkenGoldCoins.Add(droppable.Pointer);
+            droppable.DropInWater();
+        }
+        catch (Exception e) { Plugin.Log.LogWarning($"[AP] Sunken Gold: {e.Message}"); }
+    }
+
+    private static GameObject _maskPrefab;
+
+    // Greed Mask Shard: a Greed mask clatters to the ground beside you, then crumbles away.
+    public static void GreedMaskShard()
+    {
+        Junk(GameData.GreedMaskShard);
+        var player = GameAccess.Player;
+        if (player == null) return;
+        try
+        {
+            if (_maskPrefab == null)
+                foreach (var go in Resources.FindObjectsOfTypeAll<GameObject>())
+                {
+                    if (go == null || go.scene.name != null || go.name != "TrollMask") continue; // the prefab, not a live mask
+                    _maskPrefab = go;
+                    break;
+                }
+            if (_maskPrefab == null) return;
+            float dir = GameAccess.FacingDirection(player);
+            var mask = Object.Instantiate(_maskPrefab, player.transform.position + new Vector3(dir * 1.5f, 2f, 0f), Quaternion.identity);
+            mask.SetActive(true);
+            var body = mask.GetComponent<Rigidbody2D>();
+            if (body != null) body.AddForce(new Vector2(dir * 2f, 4f), ForceMode2D.Impulse);
+            Object.Destroy(mask, 8f);
+        }
+        catch (Exception e) { Plugin.Log.LogWarning($"[AP] Greed Mask Shard: {e.Message}"); }
     }
 
     public static void SpawnVagrants(int count)
@@ -179,14 +252,6 @@ internal static class ItemEffects
         }
     }
 
-    public static void WaveBack(string source)
-    {
-        var enemies = GameAccess.Enemies;
-        if (enemies == null) return;
-        enemies.SpawnRetaliation();
-        Trap("Wave Back! A portal retaliates. The Greed are coming!", source);
-    }
-
     public static void WavesGoneBy(string source, int days)
     {
         int island = GameAccess.CurrentIsland;
@@ -286,6 +351,26 @@ internal static class ItemEffects
         }
         steed.BecomeTired();
         Trap("Stam Dam! Your mount is exhausted.", source);
+    }
+
+    // A blood-moon wave right now: the game's own boss wave for this island and day, from both sides.
+    public static void RedMoon(string source)
+    {
+        var director = GameAccess.Director;
+        var enemies = GameAccess.Enemies;
+        if (director == null || enemies == null)
+        {
+            Trap("Red Moon! ...but the Greed couldn't find you.", source);
+            return;
+        }
+        var wave = director.GetWaveProfileForDay(director.CurrentIslandDays)?.bossWave;
+        if (wave == null)
+        {
+            Trap("Red Moon! ...but the moon stayed pale.", source);
+            return;
+        }
+        enemies.SpawnWaveImmediate(wave);
+        Trap("Red Moon! A blood-moon horde is coming for you.", source);
     }
 
     // --- Bad king traps ---
@@ -460,11 +545,11 @@ internal static class ItemEffects
     {
         if (!player.hasCrown) return "";
 
-        // Four half-screens away: well out of sight. Towards the nearest live portal if there is one, but not
+        // Just out of sight (a little over half a screen). Towards the nearest live portal if there is one, but not
         // right on top of it; otherwise the way you're facing.
         float px = player.transform.position.x;
         float view = HalfViewWidth(player);
-        float distance = view * 4f;
+        float distance = view * 1.1f;
         float dir = GameAccess.FacingDirection(player);
         float nearest = float.MaxValue;
         foreach (var portal in Object.FindObjectsByType<Portal>(FindObjectsSortMode.None))
@@ -477,7 +562,7 @@ internal static class ItemEffects
             dir = Mathf.Sign(portal.transform.position.x - px);
         }
         if (nearest < float.MaxValue) distance = Mathf.Min(distance, nearest - view * 0.5f);
-        distance = Mathf.Max(distance, view * 1.1f);
+        distance = Mathf.Max(distance, view * 0.6f);
 
         float target = ClampToLevel(px + dir * distance);
         player.LoseCrown(new Vector2(dir * 8f, 8f), false, false);

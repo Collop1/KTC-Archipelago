@@ -1,31 +1,35 @@
-# KTC-Archipelago
+# Kingdom Two Crowns Archipelago
 
-Archipelago multiworld randomizer support for *Kingdom Two Crowns*, forked from
-[Catalyss/Archipelago-Kingdom2Crown](https://github.com/Catalyss/Archipelago-Kingdom2Crown) and updated for the
-current BepInEx folder layout.
+Play *Kingdom Two Crowns* as part of an [Archipelago](https://archipelago.gg/) multiworld randomizer. Opening
+chests, destroying portals, uncovering statues and growing your kingdom send items to other players' games, while
+your own castle upgrades, technology, islands, mounts, hermits and more arrive from theirs.
 
-This repo holds both halves of the integration side by side:
+- Supports the base **Two Crowns** campaign, **Shogun**, **Dead Lands**, **Norselands** and **Call of Olympus**
+- Built-in Archipelago client: press **F2** in game to connect, track items and checks, ask for hints and chat. No
+  separate client program needed.
+- Traps, DeathLink, and options to make a seed as short or as long as you like
 
-- **[`mod/`](mod/)** - the in-game BepInEx/IL2CPP mod (C#): an in-game Archipelago client (F2 menu + notification
-  feed) that sends location checks, applies received items and traps, and gates castle upgrades, statues, hermits,
-  mounts and sailing behind items. See [`mod/docs/README.md`](mod/docs/README.md) for installation and testing.
-- **[`apworld/kingdom_two_crowns/`](apworld/kingdom_two_crowns/)** - the Archipelago "apworld" (Python) that a
-  room host runs to generate a multiworld seed: item/location tables, options, region layout and access logic. See
-  [`apworld/kingdom_two_crowns/docs/`](apworld/kingdom_two_crowns/docs/) for the game info page and setup guide.
-  Supports the base Two Crowns campaign plus Shogun, Dead Lands, Norselands and Call of Olympus
-  ([`campaigns.py`](apworld/kingdom_two_crowns/campaigns.py) holds each campaign's per-island content, taken from the
-  game's own level configs).
+**[What's randomized](apworld/kingdom_two_crowns/docs/en_Kingdom%20Two%20Crowns.md)** ·
+**[Full setup guide](apworld/kingdom_two_crowns/docs/setup_en.md)** ·
+**[In-game menu](mod/docs/README.md)** ·
+**[Downloads](https://github.com/Collop1/KTC-Archipelago/releases/latest/)**
 
-The mod refers to items and locations only by name and looks ids up in the server's data package, so the apworld is
-the single source of truth for ids. Names still have to match: `mod/Archipelago/GameData.cs` mirrors the names and
-campaign tables in `apworld/kingdom_two_crowns/items.py`, `locations.py` and `campaigns.py`, so a change to one needs
-the matching change in the other. Options reach the mod through slot_data (`world.fill_slot_data`).
+## Quick setup
 
-## Building
+You'll need *Kingdom Two Crowns* on Steam (Windows) and [Archipelago](https://github.com/ArchipelagoMW/Archipelago/releases/latest/)
+0.6 or newer.
 
-- Mod: `dotnet build -c Release` in `mod/` (the csproj points at the game's `BepInEx/interop` folder via `GamePath`).
-  Copy `APKingdom2Crown.dll`, `Archipelago.MultiClient.Net.dll` and `Newtonsoft.Json.dll` from
-  `mod/bin/Release/net6.0/` into `BepInEx/plugins/Archipelago/`.
-- apworld: zip the `apworld/kingdom_two_crowns` folder (the folder itself at the zip root) and rename it to
-  `kingdom_two_crowns.apworld`, then drop it in Archipelago's `custom_worlds` folder. Its tests run with Archipelago's
-  test suite (`pytest worlds/kingdom_two_crowns/test/__init__.py` from an Archipelago source checkout).
+1. From the [releases page](https://github.com/Collop1/KTC-Archipelago/releases/latest/), download the mod
+   (`KTC-Archipelago-v<version>.zip`) and the apworld (`kingdom_two_crowns.apworld`).
+2. **Install the mod.** In Steam, right-click *Kingdom Two Crowns* > **Manage** > **Browse local files**. Unzip
+   everything in the mod zip into that folder, so the `BepInEx` folder sits next to `KingdomTwoCrowns.exe`.
+3. **Install the apworld.** Double-click `kingdom_two_crowns.apworld` to open it with the Archipelago Launcher, or
+   copy it into the `custom_worlds` folder of your Archipelago install.
+4. **Make your options file.** In the Archipelago Launcher, open **Options Creator**, pick *Kingdom Two Crowns* and
+   choose your campaign, then send the file to whoever is generating the multiworld.
+5. **Play.** Launch the game (the first launch takes a few minutes while the mod sets itself up) and start a new
+   campaign of the kind you picked. Press **F2**, enter the server address, your slot name and the password if
+   there is one, and click **Connect**.
+
+Stuck, or getting errors? The **[full setup guide](apworld/kingdom_two_crowns/docs/setup_en.md)** goes through
+every step in more detail and has a troubleshooting section for common problems.

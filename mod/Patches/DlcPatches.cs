@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -13,8 +14,13 @@ internal static class PowerCanActivatePatch
 {
     private static readonly Dictionary<string, float> LastWarning = new();
 
+    // Several of these overrides compile to identical machine code, which the game's build merges into one function
+    // (Thor's, Hel's and the four Olympus gods' all share one). Hooking that function once per class chained the
+    // hooks into each other, and using any of those powers crashed the game with a stack overflow. So each piece of
+    // game code is hooked once; the postfix works out which power it is from the instance either way.
     private static IEnumerable<MethodBase> TargetMethods()
     {
+        var hooked = new HashSet<IntPtr>();
         foreach (var type in new[]
                  {
                      typeof(ThorItem), typeof(HeimdalItem), typeof(HelsHead), typeof(LokiStaff),
@@ -22,7 +28,32 @@ internal static class PowerCanActivatePatch
                  })
         {
             var method = AccessTools.DeclaredMethod(type, nameof(ItemOfPower.CanActivate));
-            if (method != null) yield return method;
+            if (method == null) continue;
+            var code = NativeCode(method);
+            if (code == IntPtr.Zero)
+            {
+                // Can't tell whether it's shared, and hooking shared code twice crashes; better ungated than that.
+                Plugin.Log.LogWarning($"[AP] Not gating {type.Name}: couldn't find its game code");
+                continue;
+            }
+            if (!hooked.Add(code)) continue;
+            yield return method;
+        }
+        Plugin.Log.LogInfo($"[AP] Items of Power: {hooked.Count} distinct CanActivate functions hooked");
+    }
+
+    private static IntPtr NativeCode(MethodBase method)
+    {
+        try
+        {
+            var field = Il2CppInterop.Common.Il2CppInteropUtils.GetIl2CppMethodInfoPointerFieldForGeneratedMethod(method);
+            var info = (IntPtr)field.GetValue(null);
+            return info == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(info); // MethodInfo starts with its code pointer
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"[AP] Power code lookup for {method.DeclaringType?.Name}: {e.Message}");
+            return IntPtr.Zero;
         }
     }
 

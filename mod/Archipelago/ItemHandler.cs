@@ -143,11 +143,8 @@ internal static class ItemHandler
             case GameData.GemPouch:
                 ItemEffects.GiveCurrency(CurrencyType.Gems, GameData.GemsPerPouch);
                 return;
-            case GameData.CoinPouch:
+            case GameData.Coins:
                 ItemEffects.GiveCurrency(CurrencyType.Coins, UnityEngine.Random.Range(3, 8));
-                return;
-            case GameData.CoinSack:
-                ItemEffects.GiveCurrency(CurrencyType.Coins, 10);
                 return;
             case GameData.Gem:
                 ItemEffects.GiveCurrency(CurrencyType.Gems, 1);
@@ -155,14 +152,20 @@ internal static class ItemHandler
             case GameData.Vagrants:
                 ItemEffects.SpawnVagrants(AP.Slot.VagrantsPerItem);
                 return;
+            case GameData.TuftOfGrass:
+                ItemEffects.FeedSteed();
+                return;
+            case GameData.SunkenGold:
+                ItemEffects.SunkenGold();
+                return;
+            case GameData.GreedMaskShard:
+                ItemEffects.GreedMaskShard();
+                return;
             case GameData.TripTrap:
                 ItemEffects.Trip(source);
                 return;
             case GameData.SlipperyPouchTrap:
                 ItemEffects.SlipperyPouch(source);
-                return;
-            case GameData.WaveBackTrap:
-                ItemEffects.WaveBack(source);
                 return;
             case GameData.WavesGoneByTrap:
                 ItemEffects.WavesGoneBy(source, AP.Slot.WavesGoneByDays);
@@ -181,6 +184,9 @@ internal static class ItemHandler
                 return;
             case GameData.ToolTheftTrap:
                 ItemEffects.ToolTheft(source, AP.Slot.BadKingAmount);
+                return;
+            case GameData.RedMoonTrap:
+                ItemEffects.RedMoon(source);
                 return;
             case DeathLinkCrown:
                 ItemEffects.DeathLink(source, crown: true, wallet: false);

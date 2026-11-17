@@ -5,13 +5,13 @@ from worlds.AutoWorld import World
 from . import items, locations, regions, rules
 from .campaigns import CAMPAIGN_BY_OPTION, CAMPAIGNS, Campaign
 from .items import KingdomTwoCrownsItem
-from .locations import MILESTONES, milestone_interval, milestone_thresholds
+from .locations import MILESTONES, milestone_interval, milestone_islands, milestone_thresholds
 from .options import KingdomTwoCrownsOptions
 from .regions import OLYMPUS_REGION
 from .web_world import KingdomTwoCrownsWebWorld
 
 # Bump when slot_data changes shape so the mod can warn about a mismatched apworld.
-SLOT_DATA_VERSION = 6
+SLOT_DATA_VERSION = 8
 
 
 class KingdomTwoCrownsWorld(World):
@@ -77,6 +77,7 @@ class KingdomTwoCrownsWorld(World):
             **self.options.as_dict(
                 "islands_to_liberate",
                 "island_unlocks",
+                "progressive_coin_sacks",
                 "waves_gone_by_days",
                 "vagrants_per_item",
                 "death_link",
@@ -85,13 +86,17 @@ class KingdomTwoCrownsWorld(World):
                 "bad_king_amount",
             ),
         }
+        # Bombs are always per island for numbered campaigns (the key stays for the mod's sake).
+        data["bomb_unlocks"] = not self.campaign.is_campaign_wide
         # Islands the boat may go to (1..N); 0 for Call of Olympus, which doesn't limit islands.
         data["play_islands"] = len(self.islands_in_play)
-        # The mod rebuilds every milestone location name from these (building sanity: interval 1).
+        # The mod rebuilds every milestone location name from these. per_island: counted separately on each island
+        # in play ("Island 3: ..."), with count checks on every one of them.
         data["milestones"] = {
             category: {
                 "interval": milestone_interval(self, category),
                 "count": len(milestone_thresholds(self, category)),
+                "per_island": milestone_islands(self, category) != [0],
             }
             for category in MILESTONES
         }

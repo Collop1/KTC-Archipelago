@@ -17,6 +17,7 @@ internal static class GameData
     public const int MaxCastleUpgrades = 6;
 
     public static string IslandUnlock(int island) => $"Island {island} Unlock";
+    public static string IslandBombs(int island) => $"Island {island} Bombs";
 
     public static readonly Dictionary<Statue.Deity, string> StatueItems = new()
     {
@@ -90,31 +91,42 @@ internal static class GameData
 
     public const string GemPouch = "Gem Pouch";
     public const int GemsPerPouch = 3;
-    public const string CoinPouch = "Coin Pouch";
-    public const string CoinSack = "Coin Sack";
+    public const string Coins = "Coins";
     public const string Gem = "Gem";
     public const string Vagrants = "Vagrants";
+    public const string TuftOfGrass = "Tuft of Grass";
+
+    // Each one grows the purse: 0.5x its normal size with none, 3x with all of them (Progressive Coin Sacks).
+    public const string ProgressiveCoinSack = "Progressive Coin Sack";
+    // Call of Olympus without Progressive Coin Sacks: lets you buy Hermes's sack upgrade.
+    public const string HermesSack = "Hermes Sack";
+
+    public const string SunkenGold = "Sunken Gold (Junk)";
+    public const string GreedMaskShard = "Greed Mask Shard (Junk)";
 
     public static readonly string[] JunkItems =
     {
-        "Sunken Gold (Junk)", "Broken Crown (Junk)", "Tuft of Grass (Junk)", "Greed Mask Shard (Junk)",
+        SunkenGold, "Broken Crown (Junk)", GreedMaskShard,
         "Soggy Bread (Junk)", "Bent Arrow (Junk)", "Lost Banner (Junk)",
+        "Rusty Hammer (Junk)", "Moth-Eaten Cloak (Junk)", "Cracked Gem (Junk)", "Hermit's Old Sock (Junk)",
+        "Rabbit's Foot (Junk)", "Boat Plank (Junk)", "Banker's IOU (Junk)", "Squashed Berry (Junk)",
+        "Tangled Fishing Line (Junk)", "Chewed Stick (Junk)",
     };
 
     public const string TripTrap = "Trip Trap";
     public const string SlipperyPouchTrap = "Slippery Pouch Trap";
-    public const string WaveBackTrap = "Wave Back Trap";
     public const string WavesGoneByTrap = "Waves Gone By Trap";
     public const string DamnedNightTrap = "Damned Night Trap";
     public const string DecayTrap = "Decay Trap";
     public const string StamDamTrap = "Stam Dam Trap";
     public const string DesertionTrap = "Desertion Trap";
     public const string ToolTheftTrap = "Tool Theft Trap";
+    public const string RedMoonTrap = "Red Moon Trap";
 
     public static readonly string[] Traps =
     {
-        TripTrap, SlipperyPouchTrap, WaveBackTrap, WavesGoneByTrap, DamnedNightTrap, DecayTrap, StamDamTrap,
-        DesertionTrap, ToolTheftTrap,
+        TripTrap, SlipperyPouchTrap, WavesGoneByTrap, DamnedNightTrap, DecayTrap, StamDamTrap,
+        DesertionTrap, ToolTheftTrap, RedMoonTrap,
     };
 
     public enum ItemKind { Unlock, Filler, Junk, Trap }
@@ -126,21 +138,29 @@ internal static class GameData
         public string[] Names;
     }
 
-    // The items a campaign can receive, grouped for the menu (Items and Debug tabs).
-    public static ItemGroup[] ItemGroupsFor(Campaign campaign)
+    // The items a seed can contain, grouped for the menu (Items and Debug tabs).
+    public static ItemGroup[] ItemGroupsFor(SlotSettings slot)
     {
+        var campaign = slot.Campaign;
         var groups = new List<ItemGroup>
         {
             new() { Title = "Buildings", Kind = ItemKind.Unlock, Names = new[] { ProgressiveCastle, StoneTech, IronTech } },
         };
         if (!campaign.CampaignWide)
+        {
             groups.Add(new() { Title = "Islands", Kind = ItemKind.Unlock, Names = Enumerable.Range(2, campaign.IslandCount - 1).Select(IslandUnlock).ToArray() });
+            groups.Add(new() { Title = "Bombs", Kind = ItemKind.Unlock, Names = Enumerable.Range(1, campaign.IslandCount).Select(IslandBombs).ToArray() });
+        }
         groups.Add(new() { Title = "Statues", Kind = ItemKind.Unlock, Names = campaign.Statues });
         groups.Add(new() { Title = "Hermits", Kind = ItemKind.Unlock, Names = campaign.Hermits });
         groups.Add(new() { Title = "Mounts", Kind = ItemKind.Unlock, Names = campaign.Mounts });
         if (campaign.Powers.Length > 0)
             groups.Add(new() { Title = "Powers", Kind = ItemKind.Unlock, Names = campaign.Powers });
-        groups.Add(new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { GemPouch, CoinPouch, CoinSack, Gem, Vagrants } });
+        if (slot.ProgressiveSacks > 0)
+            groups.Add(new() { Title = "Sack", Kind = ItemKind.Unlock, Names = new[] { ProgressiveCoinSack } });
+        else if (campaign.CampaignWide)
+            groups.Add(new() { Title = "Sack", Kind = ItemKind.Unlock, Names = new[] { HermesSack } });
+        groups.Add(new() { Title = "Filler", Kind = ItemKind.Filler, Names = new[] { GemPouch, Coins, Gem, Vagrants, TuftOfGrass } });
         groups.Add(new() { Title = "Junk", Kind = ItemKind.Junk, Names = JunkItems });
         groups.Add(new() { Title = "Traps", Kind = ItemKind.Trap, Names = Traps });
         return groups.ToArray();
@@ -149,7 +169,7 @@ internal static class GameData
     public static ItemKind KindOf(string itemName)
     {
         // Gem Pouches are progression in the apworld, but in the game they're spent like any filler.
-        if (itemName is GemPouch or CoinPouch or CoinSack or Gem or Vagrants) return ItemKind.Filler;
+        if (itemName is GemPouch or Coins or Gem or Vagrants or TuftOfGrass) return ItemKind.Filler;
         if (System.Array.IndexOf(Traps, itemName) >= 0) return ItemKind.Trap;
         if (System.Array.IndexOf(JunkItems, itemName) >= 0) return ItemKind.Junk;
         return ItemKind.Unlock;
@@ -309,13 +329,10 @@ internal static class GameData
     public static string LiberateLocation(int island) => $"Island {island}: Liberate";
     public static string PuzzleLocation(int island, string god) => $"Island {island}: {god}'s Puzzle";
     public static string DogLocation(Campaign campaign) => campaign.CampaignWide ? "Free the Dog" : "Island 2: Free the Dog";
-    public const string FullUpgradeLocation = "Fully Upgrade an Island";
     public static string QuarryLocation(Campaign campaign) => campaign.CampaignWide ? "Build the Quarry" : $"Island {campaign.QuarryIsland}: Build the Quarry";
     public static string MineLocation(Campaign campaign) => campaign.CampaignWide ? "Build the Mine" : $"Island {campaign.MineIsland}: Build the Mine";
     public const string GrassLocation = "Eat Grass 100 Times";
     public const int GrassTarget = 100;
-    public const string SunkCoinsLocation = "Sink 25 Coins";
-    public const int SunkCoinsTarget = 25;
 
     public static readonly Dictionary<Hermit.HermitType, string> HermitBuildingLocations = new()
     {
@@ -363,48 +380,58 @@ internal static class GameData
 
     public enum Milestone
     {
-        Greed, Greedlings, Floaters, Breeders, CrownStealers, Nights, Trees,
+        Greed, Greedlings, Floaters, Chargers, GreedKnights, Breeders, CrownStealers, Nights, Trees,
         Walls, Towers, Farms, CitizenHouses,
         Villagers, Archers, Builders, Farmers, Knights,
         Animals, Deer, Rabbits, Boars,
-        Bribes, CoinsSpent,
+        Bribes, CoinsSpent, SunkCoins,
     }
 
-    // slot_data "milestones" key, location template, label for the menu
+    // slot_data "milestones" key, location template ("<verb> <thing> {0}", so lists sort by kind), label for the menu.
+    // Island-counted ones (slot_data per_island) are prefixed with their island: "Island 3: Slay Greed 100".
     public static readonly Dictionary<Milestone, (string SlotKey, string Template, string Label)> Milestones = new()
     {
-        [Milestone.Greed] = ("greed", "Slay {0} Greed", "Greed slain"),
-        [Milestone.Greedlings] = ("greedlings", "Slay {0} Greedlings", "Greedlings slain"),
-        [Milestone.Floaters] = ("floaters", "Slay {0} Floaters", "Floaters slain"),
-        [Milestone.Breeders] = ("breeders", "Slay {0} Breeders", "Breeders slain"),
-        [Milestone.CrownStealers] = ("crown_stealers", "Slay {0} Crown Stealers", "Crown Stealers slain"),
-        [Milestone.Nights] = ("nights", "Survive {0} Nights", "Nights survived"),
-        [Milestone.Trees] = ("trees", "Fell {0} Trees", "Trees felled"),
-        // Building sanity: one check per building, so the "threshold" is the building's number.
-        [Milestone.Walls] = ("walls", "Build Wall {0}", "Walls built"),
-        [Milestone.Towers] = ("towers", "Build Archer Tower {0}", "Archer towers built"),
-        [Milestone.Farms] = ("farms", "Build Farm {0}", "Farms built"),
-        [Milestone.CitizenHouses] = ("citizen_houses", "Build Citizen House {0}", "Citizen houses built"),
-        [Milestone.Villagers] = ("villagers", "Recruit {0} Villagers", "Villagers recruited"),
-        [Milestone.Archers] = ("archers", "Recruit {0} Archers", "Archers recruited"),
-        [Milestone.Builders] = ("builders", "Recruit {0} Builders", "Builders recruited"),
-        [Milestone.Farmers] = ("farmers", "Recruit {0} Farmers", "Farmers recruited"),
-        [Milestone.Knights] = ("knights", "Recruit {0} Knights", "Knights recruited"),
-        [Milestone.Animals] = ("animals", "Hunt {0} Animals", "Animals hunted"),
-        [Milestone.Deer] = ("deer", "Hunt {0} Deer", "Deer hunted"),
-        [Milestone.Rabbits] = ("rabbits", "Hunt {0} Rabbits", "Rabbits hunted"),
-        [Milestone.Boars] = ("boars", "Hunt {0} Boars", "Boars hunted"),
-        [Milestone.Bribes] = ("bribes", "Bribe the Greed with {0} Coins", "Coins the Greed took"),
-        [Milestone.CoinsSpent] = ("coins_spent", "Spend {0} Coins", "Coins spent"),
+        [Milestone.Greed] = ("greed", "Slay Greed {0}", "Greed slain"),
+        [Milestone.Greedlings] = ("greedlings", "Slay Greedlings {0}", "Greedlings slain"),
+        [Milestone.Floaters] = ("floaters", "Slay Floaters {0}", "Floaters slain"),
+        [Milestone.Chargers] = ("chargers", "Slay Chargers {0}", "Chargers slain"),
+        [Milestone.GreedKnights] = ("greed_knights", "Slay Greed Knights {0}", "Greed Knights slain"),
+        [Milestone.Breeders] = ("breeders", "Slay Breeders {0}", "Breeders slain"),
+        [Milestone.CrownStealers] = ("crown_stealers", "Slay Crown Stealers {0}", "Crown Stealers slain"),
+        [Milestone.Nights] = ("nights", "Survive Nights {0}", "Nights survived"),
+        [Milestone.Trees] = ("trees", "Fell Trees {0}", "Trees felled"),
+        [Milestone.Walls] = ("walls", "Build Walls {0}", "Walls built"),
+        [Milestone.Towers] = ("towers", "Build Archer Towers {0}", "Archer towers built"),
+        [Milestone.Farms] = ("farms", "Build Farms {0}", "Farms built"),
+        [Milestone.CitizenHouses] = ("citizen_houses", "Build Citizen Houses {0}", "Citizen houses built"),
+        [Milestone.Villagers] = ("villagers", "Recruit Villagers {0}", "Villagers recruited"),
+        [Milestone.Archers] = ("archers", "Recruit Archers {0}", "Archers recruited"),
+        [Milestone.Builders] = ("builders", "Recruit Builders {0}", "Builders recruited"),
+        [Milestone.Farmers] = ("farmers", "Recruit Farmers {0}", "Farmers recruited"),
+        [Milestone.Knights] = ("knights", "Recruit Knights {0}", "Knights recruited"),
+        [Milestone.Animals] = ("animals", "Hunt Animals {0}", "Animals hunted"),
+        [Milestone.Deer] = ("deer", "Hunt Deer {0}", "Deer hunted"),
+        [Milestone.Rabbits] = ("rabbits", "Hunt Rabbits {0}", "Rabbits hunted"),
+        [Milestone.Boars] = ("boars", "Hunt Boars {0}", "Boars hunted"),
+        [Milestone.Bribes] = ("bribes", "Bribe Greed Coins {0}", "Coins the Greed took"),
+        [Milestone.CoinsSpent] = ("coins_spent", "Spend Coins {0}", "Coins spent"),
+        [Milestone.SunkCoins] = ("sunk_coins", "Sink Coins {0}", "Coins sunk"),
     };
 
-    public static string MilestoneLocation(Milestone milestone, int threshold) => string.Format(Milestones[milestone].Template, threshold);
+    // island 0 = counted over the whole campaign.
+    public static string MilestoneLocation(Milestone milestone, int threshold, int island = 0)
+    {
+        var name = string.Format(Milestones[milestone].Template, threshold);
+        return island > 0 ? $"Island {island}: {name}" : name;
+    }
 
     // Which kill milestone (besides the "Greed" total) an enemy type counts towards.
     public static Milestone? KillCategory(EnemyType type) => type switch
     {
         EnemyType.TrollWeak or EnemyType.TrollMedium or EnemyType.ToughTroll => Milestone.Greedlings,
         EnemyType.Squid => Milestone.Floaters,
+        EnemyType.Crusher => Milestone.Chargers, // Norselands' Chargers (and Olympus portals striking back)
+        EnemyType.Knight => Milestone.GreedKnights, // Olympus portals striking back
         EnemyType.Boss or EnemyType.KillerBoss or EnemyType.BossWithStealer or EnemyType.GauntletBoss or EnemyType.Ogre => Milestone.Breeders,
         EnemyType.Stealer => Milestone.CrownStealers,
         _ => null,

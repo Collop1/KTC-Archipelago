@@ -109,6 +109,20 @@ internal static class PromoteTagPatch
     private static void Postfix(Character __result) => PromotionTracking.After(__result);
 }
 
+// Citizen houses: paying a coin at one sends out a villager.
+[HarmonyPatch(typeof(CitizenHousePayable), nameof(CitizenHousePayable.Pay))]
+internal static class CitizenHouseRecruitPatch
+{
+    private static void Postfix()
+    {
+        try
+        {
+            if (GameAccess.IsPlaying) CheckTracker.AddMilestone(GameData.Milestone.Villagers);
+        }
+        catch (Exception e) { Plugin.Log.LogError($"[AP] Citizen house patch: {e}"); }
+    }
+}
+
 // Bribery: any coin a Greed picks up, on purpose or not.
 [HarmonyPatch(typeof(Troll), nameof(Troll.PickupLoot))]
 internal static class GreedPickupPatch
@@ -177,6 +191,7 @@ internal static class DropInWaterPatch
         {
             var currency = __instance.GetComponent<DroppableCurrency>();
             if (currency == null || currency.CurrencyType != CurrencyType.Coins) return;
+            if (ItemEffects.SunkenGoldCoins.Contains(__instance.Pointer)) return; // the Sunken Gold junk item's own coin
             float now = Time.unscaledTime;
             if (Recent.TryGetValue(__instance.Pointer, out var when) && now - when < 5f) return;
             Recent[__instance.Pointer] = now;

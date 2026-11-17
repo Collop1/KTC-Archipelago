@@ -177,7 +177,7 @@ internal static class AP
             State = ModState.LoadFor(Seed, SlotName);
         }
 
-        if (Slot.SlotDataVersion < 5) // check names changed in v0.4.0
+        if (Slot.SlotDataVersion < 8) // check names changed in v0.6.0
             AddLog("<color=#FA8072>This room was generated with an older Kingdom Two Crowns apworld. Regenerate it with the apworld that came with this mod.</color>", true);
 
         try

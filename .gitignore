@@ -1,5 +1,6 @@
 mod/bin/*
 mod/obj/*
+mod/release/
 mod/AddInteropRefs.ps1
 mod/Archipelago/Archipelago MultiClient Net/*
 

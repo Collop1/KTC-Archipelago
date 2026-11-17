@@ -21,26 +21,43 @@ Things you do send checks:
 - Freeing the dog, building the boat, arriving on a new island, liberating an island
 - Dead Lands: freeing a caged ruler. Norselands: solving a god's puzzle. Call of Olympus: reaching each island
   and completing the oracle's, island and god quests.
-- Upgrading your castle (Castle Level 2-7) and fully upgrading an island
+- Upgrading your castle (Castle Level 2-7)
 - Building the Stone Quarry and the Iron Mine
 - Hermit buildings (with `hermit_building_checks`): the first time each hermit builds its building (ballista,
   bakery, stable, ...)
-- Building sanity (`building_sanity`): one check for every new wall, archer tower, farm and citizen house, up to
-  about 6-7 walls, 5 towers and 1-2 farms and houses per island you need to liberate (40 / 30 / 10 / 10 for all six
-  Norselands islands, which stays under what the hardest difficulty guarantees). Counted over the whole campaign.
-- Milestones, counted over the whole campaign. Your YAML sets how often each kind gives a check and how many
-  checks there are **per island you need to liberate**, so a one-island goal gets a short list and a full
-  campaign a long one. Later checks of a kind also expect more islands to be open, so they come up later in logic.
-  - Slaying Greed (in total and per type: Greedlings, Floaters, Breeders, Crown Stealers) and felling trees.
-    Floaters and Crown Stealers need a seed with at least 2 islands and Breeders at least 3, since they may
-    never turn up on the first island; with fewer islands those checks are left out.
-  - Surviving nights: losing your crown resets the count to 0, so the next check needs that many nights in a row
-  - Unit sanity: villagers recruited, and archers, builders, farmers and knights equipped
-  - Animal sanity: animals hunted in total, plus deer, rabbits and boars (rabbits and boars are off by default
-    because not every campaign has them)
-  - Bribing the Greed: coins any Greed picks up, on purpose or by accident
-  - Coins spent on anything
-- One-offs: your mount eating grass 100 times, and 25 coins lost to the water
+- Island milestones, counted separately on each island so farming one island doesn't finish them: you have to move
+  on. They're named after their island and kind, e.g. "Island 3: Slay Greed 100" or "Island 2: Build Walls 5". Your
+  YAML sets how often each kind gives a check and how many checks each island has. The defaults are sized from a
+  full 23-hour Norselands run, roughly an hour of play per island:
+  - Slaying Greed (any kind) and Greedlings, felling trees (at most 100 per island)
+  - Surviving nights on the island (losing your crown doesn't reset them)
+  - Building sanity: new walls (up to 8 per island), archer towers (up to 5), farms (1) and citizen houses (2),
+    which stays within what the hardest difficulty guarantees. Upgrades and rebuilding where one stood don't count.
+  - Recruiting villagers (vagrants given a coin, or from citizen houses), archers, builders and farmers
+  - Hunting animals in total, deer and rabbits (rabbits are off by default: not every campaign has them)
+  - Coins spent, coins any Greed picks up (on purpose or by accident), and coins lost to the water
+- Campaign milestones, for the rarer things, counted over the whole campaign ("Slay Breeders 3"): the rarer Greed
+  (see below), knights (at most 4 per island in the seed) and boars (about one a winter, off by default).
+- One-off: your mount eating grass 100 times
+
+Call of Olympus has no numbered islands, so there its island milestones are counted over the whole campaign
+instead, with five islands' worth of checks ("Slay Greed 1500", "Build Walls 25").
+
+### Which Greed does each campaign have?
+
+Not every campaign has every kind of Greed. Kill checks for a kind your campaign doesn't have are left out of the
+seed automatically, so a Norselands seed never asks you to slay Floaters.
+
+| Greed | Two Crowns | Shogun | Dead Lands | Norselands | Call of Olympus |
+|---|---|---|---|---|---|
+| Greed (any kind), Greedlings | yes | yes | yes | yes | yes |
+| Breeders, Crown Stealers | yes | yes | yes | yes | yes |
+| Floaters | yes | yes | yes | no | yes |
+| Chargers | no | no | no | yes | when a portal strikes back |
+| Greed Knights (shielded head-butters with archers behind them) | no | no | no | no | when a portal strikes back |
+
+Breeders, Crown Stealers, Floaters and Chargers only turn up on the later islands, so they're also left out of
+seeds with too few islands.
 
 On numbered islands, checks are progressive per island: the first coin chest you open on island 3 is
 "Island 3: Coin Chest 1", the next one "Island 3: Coin Chest 2", no matter which physical chest it was. Call of
@@ -53,6 +70,14 @@ the whole campaign ("Coin Chest 7").
 - **Stone Technology** and **Iron Technology**
 - **Island Unlocks** (with `island_unlocks` on): you can only sail to islands you have unlocked, in any order
   (only the islands in the seed have one)
+- **Island Bombs** (numbered islands): the bomb banners at an island's castle stay shut until you have that
+  island's bombs, and you need a bomb to blow up its cliff portal and liberate it. They turn up over the whole game,
+  so you liberate islands as you go instead of all of them at the end.
+- **Progressive Coin Sacks** (`progressive_coin_sacks`, 5 by default, 5-10 or `disabled`): your coin sack starts at
+  half its usual size, so coins spill out sooner, and each sack makes it bigger in equal steps up to 3x its usual
+  size with all of them. (The sack itself looks the same; the coins in it are drawn bigger or smaller.) While
+  they're on, Hermes's sack upgrade in Call of Olympus can't be bought.
+- **Hermes Sack** (Call of Olympus with progressive sacks disabled): lets you buy Hermes's sack upgrade.
 - **Statues, hermits and mounts** for your campaign: uncovering them is a check, but activating a statue's
   blessing, paying a hermit to build or riding a mount needs its item
 - **Powers** (Norselands and Call of Olympus): earning an Item of Power is a check, but using it needs its
@@ -60,18 +85,23 @@ the whole campaign ("Coin Chest 7").
 - **Gem Pouches** (3 gems each): chests no longer hand out gems, so these are how you pay gem costs. Logic
   expects enough pouches to cover the gem costs of an island and every island before it, and the pool holds 1.5x
   that many as a margin.
-- Filler: Coin Pouches (3-7 coins), Coin Sacks, single gems, vagrants who show up at your town centre, and junk
-  that does nothing, marked as such (Sunken Gold (Junk), Lost Banner (Junk), ...)
+- Filler:
+  - **Tuft of Grass** (the most common): your mount eats it on the spot, anywhere, even in winter or a forest, and
+    is fully rested and well fed
+  - **Coins** (3-7 coins), single **Gems**, and **Vagrants** who show up at your town centre
+  - Junk that does nothing useful, marked as such: Sunken Gold (Junk) pops a coin out that sinks out of reach,
+    Greed Mask Shard (Junk) drops a Greed mask beside you, and the rest (Lost Banner, Rusty Hammer, Banker's IOU,
+    Chewed Stick, ...) are just for flavour
 - Traps:
   - **Trip**: your crown is knocked off; grab it before the Greed do
   - **Slippery Pouch**: everything in your purse spills out and scatters
-  - **Wave Back**: a portal retaliates and sends Greed at you right now, day or night
   - **Waves Gone By**: waves on your current island become as strong as if extra days had passed
   - **Damned Night**: night falls immediately
   - **Decay**: your outermost walls drop a tier, or crumble if they are already at the lowest tier
   - **Stam Dam**: your mount is exhausted on the spot
   - **Desertion**: some of your subjects give up and leave your kingdom for good
   - **Tool Theft**: the Greed steal tools, from your shop racks first and then from your units' hands
+  - **Red Moon**: a blood-moon wave, as big as a real one on your island and day, attacks from both sides right now
   (`bad_king_amount` sets how many subjects or tools Desertion and Tool Theft take)
 
 ## What does DeathLink do?
@@ -79,8 +109,8 @@ the whole campaign ("Coin Chest 7").
 With `death_link` on, losing your crown kills everyone else linked, and their deaths reach you. What someone
 else's death does to you is set by `death_link_effect`:
 
-- `crown`: your crown is flung off screen towards the nearest portal (well out of sight, but short of the portal
-  itself). Get it back before the Greed do.
+- `crown`: your crown is flung just off screen towards the nearest portal (short of the portal itself). Get it
+  back before the Greed do.
 - `wallet`: every coin you carry is gone, and the Greed steal your gems. Liberating the island they were stolen on
   gives them back; if you haven't by then, they drop them after `stolen_gems_return_nights` nights (default 10),
   so a seed can never get stuck waiting on them. The Items tab shows what's been stolen.
@@ -90,7 +120,7 @@ These only apply to deaths from DeathLink; traps work as described above.
 
 ## What is the goal?
 
-Liberate a number of islands by destroying their cliff portals: `islands_to_liberate`, which defaults to every
+Liberate a number of islands by destroying their cliff portals with bombs: `islands_to_liberate`, which defaults to every
 island (5, or 6 in Norselands). In Call of Olympus, defeat the World Serpent on Mount Olympus.
 
 For a shorter game, lower `islands_to_liberate`. With `only_goal_islands` on (the default) the seed then only
@@ -98,7 +128,7 @@ uses islands 1 to that number: the other islands have no checks, the boat won't 
 hermits and Norselands powers aren't in the item pool. A one-island seed is played entirely on island 1. If you
 also switch most checks off, there may be more items than checks; the least important ones (statues, mounts and
 the like) then start in your inventory. With `only_goal_islands` off, every island stays in the seed and
-liberating any that many islands wins.
+liberating that many islands, whichever they are, wins.
 
 ## Is there an in-game client?
 

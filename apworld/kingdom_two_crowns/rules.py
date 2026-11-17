@@ -3,16 +3,17 @@
 Kept deliberately on the strict side, since being too lenient would put a required item behind a check
 the player can't actually do yet:
   - Destroying portals needs Stone Technology and a castle upgraded at least four times (bombs).
-  - Liberating an island (cliff portal) needs Stone + Iron Technology and five castle upgrades.
+  - Liberating an island (cliff portal) needs Stone + Iron Technology, five castle upgrades and that island's
+    "Island N Bombs".
   - Statues, mount shrines and hermit cabins cost gems. Chests give nothing in this randomizer, so gems
     come from Gem Pouch items: a gem-cost check on island N expects enough pouches to pay for everything on
     islands 1..N (Olympus: a growing share of the whole campaign's gem costs).
   - The Stone Quarry needs a first castle upgrade; the Iron Mine needs Stone Technology and two upgrades.
   - A hermit's building needs that hermit's item and the gems to have freed it.
   - Castle Level 5+ needs Stone Technology, Castle Level 7 needs Iron Technology.
-  - Later milestone checks expect a sturdier kingdom and more islands: milestone counts grow with each island
-    to liberate, so the k-th check of a kind expects as many islands open as it took to "earn" it. The rarer
-    Greed also expect a minimum number of islands.
+  - Island-counted milestones ("Island 3: Slay Greed 100", building sanity too) live in their island's region.
+    Campaign-wide ones are spread over the seed's islands, and the rarer Greed expect a minimum number of islands.
+    Later checks of a kind expect a sturdier kingdom.
   - Call of Olympus: the god quests expect a couple of castle upgrades, Mount Olympus expects all four god
     quests done, and defeating the serpent expects a strong castle, both techs and all four god powers.
 """
@@ -23,10 +24,10 @@ from worlds.generic.Rules import set_rule
 from .campaigns import OLYMPUS_GOD_QUESTS, OLYMPUS_ISLANDS
 from .items import GEMS_PER_POUCH
 from .locations import (
-    CASTLE_LEVELS, FULL_UPGRADE_LOCATION, GEM_KINDS, HERMIT_BUILDINGS, MILESTONE_REQUIREMENTS, MILESTONES,
+    CASTLE_LEVELS, GEM_KINDS, HERMIT_BUILDINGS, MILESTONE_REQUIREMENTS, MILESTONES,
     OLYMPUS_GOAL_LOCATION, hermits_in_play,
     PROGRESSIVE_KINDS, campaign_progressive_name, castle_level_name, island_progressive_name, liberate_name,
-    milestone_name, milestone_per_island, milestone_thresholds, mine_name, olympus_god_quest_name, olympus_reach_name,
+    milestone_islands, milestone_name, milestone_thresholds, mine_name, olympus_god_quest_name, olympus_reach_name,
     quarry_name,
 )
 
@@ -82,7 +83,8 @@ def set_all_rules(world) -> None:
                         set_rule(location(name), lambda state: can_destroy_portals(state, player))
                     elif kind in GEM_KINDS:
                         set_rule(location(name), lambda state, n=gem_need: gems(state, player) >= n)
-            set_rule(location(liberate_name(island)), lambda state: can_liberate(state, player))
+            set_rule(location(liberate_name(island)),
+                     lambda state, b=f"Island {island} Bombs": can_liberate(state, player) and state.has(b, player))
 
         if campaign.quarry_island in islands:
             set_rule(location(quarry_name(campaign.quarry_island)), lambda state: state.has(CASTLE, player, 1))
@@ -110,22 +112,25 @@ def set_all_rules(world) -> None:
         set_rule(location(castle_level_name(level)),
                  lambda state, n=level - 1, req=tuple(needed): state.has(CASTLE, player, n)
                  and state.has_all(req, player))
-    set_rule(location(FULL_UPGRADE_LOCATION),
-             lambda state: state.has(CASTLE, player, 6) and state.has_all((STONE, IRON), player))
 
     for category in MILESTONES:
         thresholds = milestone_thresholds(world, category)
         if not thresholds:
             continue
-        per_island = milestone_per_island(world, category)
         extra_castle, min_islands = MILESTONE_REQUIREMENTS[category]
+        per_island = milestone_islands(world, category) != [0]
         for i, threshold in enumerate(thresholds, start=1):
             tier = floor(3 * (i - 1) / len(thresholds))
             castle_needed = max(0, tier + extra_castle)
-            islands_needed = min(max(min_islands, ceil(i / per_island)), max_islands)
-            set_rule(location(milestone_name(category, threshold)),
-                     lambda state, c=castle_needed, m=islands_needed: state.has(CASTLE, player, c)
-                     and (m <= 1 or islands_reachable(state) >= m))
+            if per_island:
+                islands_needed = 1  # the island's own region already requires reaching it
+            else:
+                spread = ceil(i * max_islands / len(thresholds))
+                islands_needed = min(max(min_islands, spread), max_islands)
+            for island in milestone_islands(world, category):
+                set_rule(location(milestone_name(category, threshold, island)),
+                         lambda state, c=castle_needed, m=islands_needed: state.has(CASTLE, player, c)
+                         and (m <= 1 or islands_reachable(state) >= m))
 
 
 def _set_olympus_rules(world, location) -> None:

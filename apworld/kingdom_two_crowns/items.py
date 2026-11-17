@@ -44,6 +44,14 @@ ITEM_TABLE: dict[str, ItemData] = {
     "Island 5 Unlock": ItemData(ITEM_BASE + 13, P, "Islands"),
     "Island 6 Unlock": ItemData(ITEM_BASE + 14, P, "Islands"),
 
+    # --- Bombs: an island's cliff portal can only be bombed once you have its bombs ---
+    "Island 1 Bombs": ItemData(ITEM_BASE + 70, P, "Bombs"),
+    "Island 2 Bombs": ItemData(ITEM_BASE + 71, P, "Bombs"),
+    "Island 3 Bombs": ItemData(ITEM_BASE + 72, P, "Bombs"),
+    "Island 4 Bombs": ItemData(ITEM_BASE + 73, P, "Bombs"),
+    "Island 5 Bombs": ItemData(ITEM_BASE + 74, P, "Bombs"),
+    "Island 6 Bombs": ItemData(ITEM_BASE + 75, P, "Bombs"),
+
     # --- Statues: unlocking one with gems is a check; activating its blessing needs the item ---
     "Statue of Archery": ItemData(ITEM_BASE + 20, U, "Statues"),
     "Statue of Building": ItemData(ITEM_BASE + 21, U, "Statues"),
@@ -98,34 +106,48 @@ ITEM_TABLE: dict[str, ItemData] = {
     "Power of Hephaestus": ItemData(ITEM_BASE + 86, U, "Powers"),
     "Power of Hermes": ItemData(ITEM_BASE + 87, U, "Powers"),
 
+    # --- Coin sack: starts at half size, each one makes it bigger, up to 3x with all of them ---
+    "Progressive Coin Sack": ItemData(ITEM_BASE + 110, U, "Sack"),
+    # Call of Olympus' bigger sack, which you can buy there; an item only when progressive sacks are off.
+    "Hermes Sack": ItemData(ITEM_BASE + 111, U, "Sack"),
+
     # --- Gems: chests give no gems in this randomizer, so these pay for statues, shrines and cabins ---
     "Gem Pouch": ItemData(ITEM_BASE + 90, P, "Gems"),  # +3 gems
 
     # --- Filler ---
-    "Coin Pouch": ItemData(ITEM_BASE + 100, F, "Filler"),  # +3 to 7 coins
-    "Coin Sack": ItemData(ITEM_BASE + 101, F, "Filler"),  # +10 coins
+    "Coins": ItemData(ITEM_BASE + 100, F, "Filler"),  # +3 to 7 coins (id 101 was the old Coin Sack)
+    "Tuft of Grass": ItemData(ITEM_BASE + 122, F, "Filler"),  # your mount eats it and is fully rested
     "Gem": ItemData(ITEM_BASE + 102, F, "Filler"),  # +1 gem
     "Vagrants": ItemData(ITEM_BASE + 103, F, "Filler"),  # spawns vagrants_per_item at the town centre
 
     # Junk: does nothing, just flavour. "(Junk)" in the name so nobody mistakes one for something useful.
     "Sunken Gold (Junk)": ItemData(ITEM_BASE + 120, F, "Junk"),
     "Broken Crown (Junk)": ItemData(ITEM_BASE + 121, F, "Junk"),
-    "Tuft of Grass (Junk)": ItemData(ITEM_BASE + 122, F, "Junk"),
     "Greed Mask Shard (Junk)": ItemData(ITEM_BASE + 123, F, "Junk"),
     "Soggy Bread (Junk)": ItemData(ITEM_BASE + 124, F, "Junk"),
     "Bent Arrow (Junk)": ItemData(ITEM_BASE + 125, F, "Junk"),
     "Lost Banner (Junk)": ItemData(ITEM_BASE + 126, F, "Junk"),
+    "Rusty Hammer (Junk)": ItemData(ITEM_BASE + 127, F, "Junk"),
+    "Moth-Eaten Cloak (Junk)": ItemData(ITEM_BASE + 128, F, "Junk"),
+    "Cracked Gem (Junk)": ItemData(ITEM_BASE + 129, F, "Junk"),
+    "Hermit's Old Sock (Junk)": ItemData(ITEM_BASE + 130, F, "Junk"),
+    "Rabbit's Foot (Junk)": ItemData(ITEM_BASE + 131, F, "Junk"),
+    "Boat Plank (Junk)": ItemData(ITEM_BASE + 132, F, "Junk"),
+    "Banker's IOU (Junk)": ItemData(ITEM_BASE + 133, F, "Junk"),
+    "Squashed Berry (Junk)": ItemData(ITEM_BASE + 134, F, "Junk"),
+    "Tangled Fishing Line (Junk)": ItemData(ITEM_BASE + 135, F, "Junk"),
+    "Chewed Stick (Junk)": ItemData(ITEM_BASE + 136, F, "Junk"),
 
     # --- Traps ---
     "Trip Trap": ItemData(ITEM_BASE + 200, T, "Traps"),  # crown is knocked off your head
     "Slippery Pouch Trap": ItemData(ITEM_BASE + 201, T, "Traps"),  # drop all coins and gems
-    "Wave Back Trap": ItemData(ITEM_BASE + 202, T, "Traps"),  # portal retaliation wave right now
     "Waves Gone By Trap": ItemData(ITEM_BASE + 203, T, "Traps"),  # future waves on this island are N days stronger
     "Damned Night Trap": ItemData(ITEM_BASE + 204, T, "Traps"),  # night falls immediately
     "Decay Trap": ItemData(ITEM_BASE + 205, T, "Traps"),  # outermost walls drop a tier
     "Stam Dam Trap": ItemData(ITEM_BASE + 206, T, "Traps"),  # your mount loses all its stamina
     "Desertion Trap": ItemData(ITEM_BASE + 207, T, "Traps"),  # some subjects give up and become vagrants again
     "Tool Theft Trap": ItemData(ITEM_BASE + 208, T, "Traps"),  # Greed steal tools from the racks, then from units
+    "Red Moon Trap": ItemData(ITEM_BASE + 209, T, "Traps"),  # a blood-moon wave attacks right now
 }
 
 GEMS_PER_POUCH = 3
@@ -144,13 +166,13 @@ JUNK_ITEMS = sorted(ITEM_NAME_GROUPS["Junk"])
 TRAP_WEIGHT_OPTIONS: dict[str, str] = {
     "trip_trap_weight": "Trip Trap",
     "slippery_pouch_trap_weight": "Slippery Pouch Trap",
-    "wave_back_trap_weight": "Wave Back Trap",
     "waves_gone_by_trap_weight": "Waves Gone By Trap",
     "damned_night_trap_weight": "Damned Night Trap",
     "decay_trap_weight": "Decay Trap",
     "stam_dam_trap_weight": "Stam Dam Trap",
     "desertion_trap_weight": "Desertion Trap",
     "tool_theft_trap_weight": "Tool Theft Trap",
+    "red_moon_trap_weight": "Red Moon Trap",
 }
 
 
@@ -176,16 +198,19 @@ def get_filler_item_name(world) -> str:
         "gems": options.gem_filler_weight.value,
         "vagrants": options.vagrant_filler_weight.value,
         "junk": options.junk_filler_weight.value,
+        "grass": options.tuft_of_grass_weight.value,
     }
     if sum(weights.values()) == 0:
         weights["coins"] = 1
     kind = world.random.choices(list(weights), list(weights.values()))[0]
     if kind == "coins":
-        return world.random.choice(["Coin Pouch", "Coin Pouch", "Coin Sack"])
+        return "Coins"
     if kind == "gems":
         return "Gem"
     if kind == "vagrants":
         return "Vagrants"
+    if kind == "grass":
+        return "Tuft of Grass"
     return world.random.choice(JUNK_ITEMS)
 
 
@@ -197,6 +222,12 @@ def campaign_item_names(world) -> list[str]:
             names += [name] * data.count
     if world.options.island_unlocks and not campaign.is_campaign_wide:
         names += [f"Island {island} Unlock" for island in world.islands_in_play if island > 1]
+    if not campaign.is_campaign_wide:
+        names += [f"Island {island} Bombs" for island in world.islands_in_play]
+    sacks = world.options.progressive_coin_sacks.value
+    names += ["Progressive Coin Sack"] * sacks
+    if campaign.is_campaign_wide and not sacks:
+        names.append("Hermes Sack")
     # Statues and mounts stay even with fewer islands: which island has which isn't fixed in every campaign.
     names += list(campaign.statues) + hermits_in_play(world) + list(campaign.mounts) + powers_in_play(world)
     names += ["Gem Pouch"] * gem_pouch_count(campaign, world.islands_in_play)
